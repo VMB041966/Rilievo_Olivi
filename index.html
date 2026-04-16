@@ -407,9 +407,11 @@
         // --- STATO DELL'APP ---
         let map;
         let userMarker; // Posizione GPS dell'utente
-        let pinMarker;  // Posizione toccata per la pianta
+        let pinMarker;  // Posizione toccata per la nuova pianta
         let treesDatabase = []; // Array per memorizzare i record
         let treeToDeleteId = null; // Memorizza l'ID in attesa di cancellazione
+        let savedMarkers = []; // Array per i marker gialli delle piante già salvate
+        let currentClickLatLng = null; // Memorizza Lat/Lng reali al momento del tocco sulla mappa
 
         // --- AUTENTICAZIONE E CLOUD LOAD ---
         async function initAuth() {
@@ -558,6 +560,9 @@
 
             // Avvia la geolocalizzazione GPS in real-time
             startGPS();
+            
+            // Renderizza i marker delle piante salvate (nel caso in cui il Cloud abbia caricato prima della Mappa)
+            renderSavedTreeMarkers();
         }
 
         function startGPS() {
@@ -667,9 +672,12 @@
             startGPS(); // Riavvia la procedura di aggancio
         }
 
-        // --- CONVERSIONE COORDINATE (WGS84 -> UTM) ---
+        // --- CONVERSIONE COORDINATE (WGS84 -> UTM) E SALVATAGGIO LAT/LNG REALI ---
         function placeMarkerAndGetUTM(latLng) {
-            // Posiziona o sposta il pin della pianta
+            // Memorizziamo Lat/Lng crudi per tracciare il puntino giallo con esattezza millimetrica al salvataggio
+            currentClickLatLng = { lat: latLng.lat(), lng: latLng.lng() };
+
+            // Posiziona o sposta il pin rosso per la NUOVA pianta
             if (!pinMarker) {
                 pinMarker = new google.maps.Marker({
                     position: latLng,
@@ -784,7 +792,7 @@
                 return;
             }
 
-            // Creazione Record
+            // Creazione Record (Aggiunti i parametri 'lat' e 'lng' puri per la tracciatura esatta)
             const treeRecord = {
                 id: id,
                 tecnico: tecnico,
@@ -793,6 +801,8 @@
                 particella: particella,
                 coord_n: coordN,
                 coord_e: coordE,
+                lat: currentClickLatLng ? currentClickLatLng.lat : null,
+                lng: currentClickLatLng ? currentClickLatLng.lng : null,
                 classe_diametrica: classe,
                 monumentalita: monumentalita,
                 ambiente: ambiente,
@@ -805,7 +815,7 @@
             // Aggiornamento UI
             updateNextId();
             document.getElementById("recordCount").innerText = treesDatabase.length;
-            renderTreeList();
+            renderTreeList(); // Questo ora ridisegnerà anche i pallini gialli sulla mappa
             
             // Reset Campi Mappa e Foto
             document.getElementById("coordN").value = "";
@@ -815,8 +825,9 @@
             document.getElementById("photoDataUrl").value = "";
             document.getElementById("photoPreview").style.display = "none";
             document.getElementById("photoNameDisplay").innerText = "";
-            if (pinMarker) pinMarker.setMap(null); // Rimuove il pin
+            if (pinMarker) pinMarker.setMap(null); // Rimuove il pin rosso di inserimento
             pinMarker = null;
+            currentClickLatLng = null; // Resetta le coordinate del tocco
 
             // Notifica Salvataggio Locale ed Esecuzione Salvataggio Cloud in Background
             showToast("Salvataggio in locale. Sincronizzazione in corso...");
@@ -830,7 +841,7 @@
             window.scrollTo(0, 0);
         }
 
-        // --- GESTIONE RECORD, ID E CANCELLAZIONI ---
+        // --- GESTIONE RECORD, VISUALIZZAZIONE MAPPA E CANCELLAZIONI ---
         function updateNextId() {
             const usedIds = treesDatabase.map(t => parseInt(t.id, 10)).sort((a,b) => a - b);
             let nextId = 1;
@@ -849,26 +860,82 @@
             const listContainer = document.getElementById("recordsList");
             if (treesDatabase.length === 0) {
                 listContainer.innerHTML = '<p class="text-gray-500 italic">Nessun rilievo salvato.</p>';
-                return;
+            } else {
+                // Ordina i record per ID crescente
+                const sortedTrees = [...treesDatabase].sort((a,b) => parseInt(a.id, 10) - parseInt(b.id, 10));
+                
+                let html = '';
+                sortedTrees.forEach(tree => {
+                    html += `
+                    <div class="flex justify-between items-center bg-white p-3 border-2 border-gray-300 rounded-lg shadow-sm">
+                        <div>
+                            <span class="font-bold text-lg text-gray-900">Pianta ${tree.id}</span>
+                            <span class="text-sm font-semibold text-gray-600 block mt-1">${tree.comune} | Fg. ${tree.foglio} | Part. ${tree.particella} <br> Coord: ${tree.coord_n} / ${tree.coord_e}</span>
+                        </div>
+                        <button type="button" onclick="showDeleteModal('${tree.id}')" class="bg-red-100 text-red-700 border-2 border-red-300 font-bold px-4 py-3 rounded-lg active:bg-red-200">
+                            🗑️ Elimina
+                        </button>
+                    </div>`;
+                });
+                listContainer.innerHTML = html;
             }
 
-            // Ordina i record per ID crescente
-            const sortedTrees = [...treesDatabase].sort((a,b) => parseInt(a.id, 10) - parseInt(b.id, 10));
-            
-            let html = '';
-            sortedTrees.forEach(tree => {
-                html += `
-                <div class="flex justify-between items-center bg-white p-3 border-2 border-gray-300 rounded-lg shadow-sm">
-                    <div>
-                        <span class="font-bold text-lg text-gray-900">Pianta ${tree.id}</span>
-                        <span class="text-sm font-semibold text-gray-600 block mt-1">${tree.comune} | Fg. ${tree.foglio} | Part. ${tree.particella} <br> Coord: ${tree.coord_n} / ${tree.coord_e}</span>
-                    </div>
-                    <button type="button" onclick="showDeleteModal('${tree.id}')" class="bg-red-100 text-red-700 border-2 border-red-300 font-bold px-4 py-3 rounded-lg active:bg-red-200">
-                        🗑️ Elimina
-                    </button>
-                </div>`;
+            // Contestualmente all'aggiornamento della lista, aggiorniamo i "pallini gialli" in mappa
+            renderSavedTreeMarkers();
+        }
+
+        // Funzione per disegnare i Marker Gialli delle piante già censite
+        function renderSavedTreeMarkers() {
+            if (!map) return; // Mappa non ancora pronta
+
+            // 1. Pulisce tutti i marker gialli attualmente disegnati
+            savedMarkers.forEach(marker => marker.setMap(null));
+            savedMarkers = [];
+
+            // 2. Itera su tutto il DB e disegna un nuovo marker per ogni pianta
+            treesDatabase.forEach(tree => {
+                let positionForMarker = null;
+
+                // Se abbiamo la Lat/Lng pura salvata in memoria (nuove piante)
+                if (tree.lat && tree.lng) {
+                    positionForMarker = { lat: tree.lat, lng: tree.lng };
+                } 
+                // Fallback: Se la pianta è stata importata e ha solo coordinate UTM, tenta Reverse Projection
+                else if (tree.coord_e && tree.coord_n) {
+                    const e = parseFloat(tree.coord_e);
+                    const n = parseFloat(tree.coord_n);
+                    if (!isNaN(e) && !isNaN(n)) {
+                        // Assumiamo Zona 33 per la Regione Puglia (Fact-Checking: Copre gran parte del territorio regionale)
+                        const projWGS84 = "+proj=longlat +datum=WGS84 +no_defs";
+                        const projUTM = `+proj=utm +zone=33 +datum=WGS84 +units=m +no_defs`;
+                        try {
+                            const wgsCoords = proj4(projUTM, projWGS84, [e, n]);
+                            // Proj4js restituisce [Longitudine, Latitudine]
+                            positionForMarker = { lat: wgsCoords[1], lng: wgsCoords[0] };
+                        } catch (err) {
+                            console.error("Errore fallback conversione UTM inversa", err);
+                        }
+                    }
+                }
+
+                // Se abbiamo ottenuto una posizione valida, posizioniamo il pallino giallo
+                if (positionForMarker) {
+                    const marker = new google.maps.Marker({
+                        position: positionForMarker,
+                        map: map,
+                        icon: {
+                            path: google.maps.SymbolPath.CIRCLE,
+                            scale: 6, // Visibile ma non ingombrante
+                            fillColor: "#FACC15", // Tailwind Yellow-400 (giallo acceso)
+                            fillOpacity: 1,
+                            strokeColor: "#854D0E", // Bordo scuro per staccare sui campi satellitari chiari
+                            strokeWeight: 2,
+                        },
+                        title: `Pianta ${tree.id} - Particella ${tree.particella}`
+                    });
+                    savedMarkers.push(marker);
+                }
             });
-            listContainer.innerHTML = html;
         }
 
         function showDeleteModal(id) {
@@ -1071,6 +1138,10 @@
             // Recuperiamo il nome del Tecnico dal primo record utile (o dal form se vuoto)
             const nomeTecnico = treesDatabase.length > 0 && treesDatabase[0].tecnico ? treesDatabase[0].tecnico : document.getElementById("tecnico").value;
 
+            // Recuperiamo la versione corrente dell'App
+            const buildVersion = document.getElementById("appVersion").innerText;
+            const appInfoTesto = `Rilievo Olivi - ${buildVersion}`;
+
             for (let i = 1; i <= totalPages; i++) {
                 doc.setPage(i);
                 
@@ -1079,6 +1150,11 @@
                 doc.setFontSize(10);
                 doc.setTextColor(80, 80, 80); // Grigio scuro per il footer
                 doc.text(`Pag. ${i} di ${totalPages}`, 148.5, 202, { align: 'center' });
+                
+                // Nome App e Build (A sinistra, font corsivo, size 9)
+                doc.setFont("helvetica", "italic");
+                doc.setFontSize(9);
+                doc.text(appInfoTesto, 14, 202, { align: 'left' });
                 
                 // Riferimenti Tecnico (A destra, font corsivo, size 9)
                 doc.setFont("helvetica", "italic");

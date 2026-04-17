@@ -291,9 +291,62 @@
                 🗺️ Mappa (.PDF)
             </button>
         </div>
+
+        <hr class="border-2 border-gray-300 my-8">
+
+        <!-- GESTIONE SESSIONI -->
+        <h2 class="text-xl font-bold uppercase mb-4 text-gray-800">Gestione Sessioni (Archivio)</h2>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
+            <button type="button" class="btn shadow-md" onclick="showNewSessionModal()" style="background-color: #991b1b; color: white; border-color: #450a0a;">
+                🆕 Nuova Sessione
+            </button>
+            <button type="button" class="btn shadow-md" onclick="showArchiveModal()" style="background-color: #374151; color: white; border-color: #111827;">
+                📂 Archivio Storico
+            </button>
+        </div>
     </main>
 
     <div id="toast">Operazione completata!</div>
+
+    <!-- Modal Conferma Nuova Sessione -->
+    <div id="newSessionModal" class="fixed inset-0 bg-black bg-opacity-75 hidden flex items-center justify-center z-[120] p-4">
+        <div class="bg-white rounded-lg p-6 max-w-md w-full shadow-2xl border-t-8 border-red-800">
+            <h3 class="text-2xl font-black text-red-800 mb-4 uppercase">Attenzione!</h3>
+            <p class="text-gray-800 text-lg mb-6 font-medium">
+                Stai per svuotare la mappa e iniziare una nuova sessione di rilievo.<br><br>
+                I dati attualmente visibili a schermo <strong>non verranno persi</strong>, ma saranno automaticamente congelati e salvati nell'Archivio Storico del dispositivo.
+            </p>
+            <div class="flex flex-col space-y-3">
+                <button onclick="confirmNewSession()" class="w-full px-4 py-4 bg-red-800 text-white font-black rounded-lg hover:bg-red-900 text-xl uppercase shadow-md border-2 border-red-950">
+                    Sì, Inizia Nuova Sessione
+                </button>
+                <button onclick="closeNewSessionModal()" class="w-full px-4 py-3 bg-gray-200 text-gray-800 border-2 border-gray-400 font-bold rounded-lg hover:bg-gray-300 text-lg uppercase shadow-sm">
+                    Annulla
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Archivio Sessioni -->
+    <div id="archiveModal" class="fixed inset-0 bg-black bg-opacity-75 hidden flex items-center justify-center z-[120] p-4">
+        <div class="bg-white rounded-lg p-6 max-w-lg w-full max-h-[85vh] flex flex-col shadow-2xl border-t-8 border-gray-800">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-2xl font-black text-gray-900 uppercase">Archivio Storico</h3>
+                <button onclick="closeArchiveModal()" class="text-gray-500 hover:text-gray-800 text-3xl font-bold">&times;</button>
+            </div>
+            <p class="text-gray-700 mb-4 text-sm font-semibold">Carica i vecchi rilievi per visualizzarli in mappa o esportarli. I dati attualmente a schermo verranno auto-salvati per sicurezza.</p>
+            
+            <div id="archiveListContainer" class="flex-1 overflow-y-auto pr-2 space-y-3">
+                <!-- Verrà popolato dinamicamente -->
+            </div>
+            
+            <div class="mt-6 pt-4 border-t-2 border-gray-200">
+                <button onclick="closeArchiveModal()" class="w-full px-4 py-3 bg-gray-200 text-gray-800 border-2 border-gray-400 font-bold rounded-lg hover:bg-gray-300 text-lg uppercase shadow-sm">
+                    Chiudi Archivio
+                </button>
+            </div>
+        </div>
+    </div>
 
     <!-- Modal Errore/Avvisi -->
     <div id="errorModal" class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center z-[100]">
@@ -380,7 +433,16 @@
         window.retryGpsConnection = retryGpsConnection;
         window.closeGpsPermissionModal = closeGpsPermissionModal;
         window.saveApiKeyAndLoadMap = saveApiKeyAndLoadMap;
-        window.centerMapOnTree = centerMapOnTree; // Esposizione nuova funzione di centratura
+        window.centerMapOnTree = centerMapOnTree;
+        
+        // Esponi funzioni di gestione sessione
+        window.showNewSessionModal = showNewSessionModal;
+        window.closeNewSessionModal = closeNewSessionModal;
+        window.confirmNewSession = confirmNewSession;
+        window.showArchiveModal = showArchiveModal;
+        window.closeArchiveModal = closeArchiveModal;
+        window.loadSessionFromArchive = loadSessionFromArchive;
+        window.deleteSessionFromArchive = deleteSessionFromArchive;
 
         // --- STATO DELL'APP ---
         let map;
@@ -391,16 +453,16 @@
         let savedMarkers = []; // Array per i marker gialli delle piante già salvate
         let currentClickLatLng = null; // Memorizza Lat/Lng reali al momento del tocco sulla mappa
 
-        // --- GESTIONE DATABASE LOCALE (INDEXED DB - OFFLINE FIRST) ---
-        // IndexedDB è perfetto per salvare enormi quantità di dati (come le foto Base64) 
-        // permanentemente all'interno della memoria fisica del browser, svincolandoci dal Cloud.
+        // --- GESTIONE DATABASE LOCALE E ARCHIVIO (INDEXED DB - V.2) ---
         const dbName = "OliviDB";
-        const storeName = "rilievi";
+        const storeName = "rilievi";             // La sessione attiva (il banco di lavoro)
+        const archiveStoreName = "sessioni_salvate"; // L'archivio di tutte le vecchie giornate
         let localDB;
 
         function initLocalDB() {
             return new Promise((resolve, reject) => {
-                const request = indexedDB.open(dbName, 1);
+                // Fact-Checking: Bump versione a 2 per istruire il browser a creare la nuova tabella d'archivio senza toccare quella esistente
+                const request = indexedDB.open(dbName, 2);
                 request.onerror = (event) => {
                     console.error("Errore apertura IndexedDB", event);
                     reject("Errore IndexedDB");
@@ -411,20 +473,25 @@
                 };
                 request.onupgradeneeded = (event) => {
                     localDB = event.target.result;
-                    // Se non esiste, crea la "tabella" usando 'id' come chiave primaria
+                    // Tabella di lavoro standard
                     if (!localDB.objectStoreNames.contains(storeName)) {
                         localDB.createObjectStore(storeName, { keyPath: "id" });
+                    }
+                    // Tabella per lo stoccaggio storico delle sessioni complete
+                    if (!localDB.objectStoreNames.contains(archiveStoreName)) {
+                        localDB.createObjectStore(archiveStoreName, { keyPath: "id_sessione" });
                     }
                 };
             });
         }
 
+        // SALVATAGGIO / CARICAMENTO SESSIONE CORRENTE 
         async function saveToLocalDB(record) {
             if (!localDB) return false;
             return new Promise((resolve, reject) => {
                 const transaction = localDB.transaction([storeName], "readwrite");
                 const store = transaction.objectStore(storeName);
-                const request = store.put(record); // put aggiunge o sovrascrive
+                const request = store.put(record); 
                 request.onsuccess = () => resolve(true);
                 request.onerror = () => reject(false);
             });
@@ -452,13 +519,21 @@
             });
         }
 
-        // Forza un salvataggio manuale di tutta la RAM nel disco locale
+        async function clearActiveDB() {
+            if (!localDB) return false;
+            return new Promise((resolve) => {
+                const transaction = localDB.transaction([storeName], "readwrite");
+                const store = transaction.objectStore(storeName);
+                const request = store.clear();
+                request.onsuccess = () => resolve(true);
+            });
+        }
+
         async function forceCloudSync() {
             if (treesDatabase.length === 0) {
                 showToast("Nessun dato da sincronizzare.");
                 return;
             }
-
             showToast("Salvataggio su disco in corso...");
             let count = 0;
             for (const tree of treesDatabase) {
@@ -466,6 +541,147 @@
                 if(success) count++;
             }
             showToast(`Salvataggio completato: ${count}/${treesDatabase.length} record in memoria protetta.`);
+        }
+
+        // --- FUNZIONALITÀ ARCHIVIO STORICO E NUOVA SESSIONE ---
+        
+        function showNewSessionModal() {
+            document.getElementById("newSessionModal").classList.remove("hidden");
+        }
+        function closeNewSessionModal() {
+            document.getElementById("newSessionModal").classList.add("hidden");
+        }
+        
+        async function confirmNewSession() {
+            // Se c'è lavoro in corso, prima di cancellarlo, lo blinda nell'archivio storico
+            if (treesDatabase.length > 0) {
+                await archiveCurrentSession();
+            }
+            
+            // Svuota la RAM e la tabella di lavoro
+            treesDatabase = [];
+            await clearActiveDB();
+            
+            // Azzera la mappa e i form
+            updateNextId();
+            document.getElementById("recordCount").innerText = "0";
+            renderTreeList();
+            closeNewSessionModal();
+            showToast("Nuova sessione avviata. Mappa pulita e dati archiviati.");
+        }
+
+        async function archiveCurrentSession() {
+            if (!localDB || treesDatabase.length === 0) return false;
+            
+            const dataCorrente = new Date();
+            // Fact-Checking formattazione: Estrazione giorno/ora pulita per l'identificativo visivo
+            const dataString = dataCorrente.toLocaleDateString('it-IT') + " " + dataCorrente.toLocaleTimeString('it-IT', {hour: '2-digit', minute:'2-digit'});
+            
+            const sessionRecord = {
+                id_sessione: dataCorrente.getTime().toString(), // ID univoco per il database
+                data_creazione: dataString,
+                record_count: treesDatabase.length,
+                data: JSON.parse(JSON.stringify(treesDatabase)) // Copia profonda e sganciata dell'intero database attuale
+            };
+
+            return new Promise((resolve) => {
+                const transaction = localDB.transaction([archiveStoreName], "readwrite");
+                const store = transaction.objectStore(archiveStoreName);
+                store.put(sessionRecord).onsuccess = () => resolve(true);
+            });
+        }
+
+        async function getArchivedSessions() {
+            if (!localDB) return [];
+            return new Promise((resolve) => {
+                const transaction = localDB.transaction([archiveStoreName], "readonly");
+                const store = transaction.objectStore(archiveStoreName);
+                const request = store.getAll();
+                request.onsuccess = () => resolve(request.result);
+            });
+        }
+
+        async function showArchiveModal() {
+            const listDiv = document.getElementById("archiveListContainer");
+            listDiv.innerHTML = "<p class='text-gray-600 font-bold'>Lettura memoria protetta...</p>";
+            document.getElementById("archiveModal").classList.remove("hidden");
+            
+            const sessions = await getArchivedSessions();
+            
+            if (sessions.length === 0) {
+                listDiv.innerHTML = "<p class='text-gray-500 italic mt-4'>L'archivio storico è vuoto.</p>";
+                return;
+            }
+            
+            // Ordina decrescente (le sessioni più recenti in alto)
+            sessions.sort((a,b) => parseInt(b.id_sessione) - parseInt(a.id_sessione));
+
+            let html = "";
+            sessions.forEach(s => {
+                html += `
+                <div class="bg-gray-50 p-4 rounded-lg border-2 border-gray-300 flex flex-col sm:flex-row justify-between items-start sm:items-center shadow-sm">
+                    <div class="mb-3 sm:mb-0">
+                        <span class="font-black text-gray-900 text-lg uppercase block">Rilievo del ${s.data_creazione}</span>
+                        <span class="font-bold text-sm text-gray-600">Alberi totali campionati: ${s.record_count}</span>
+                    </div>
+                    <div class="flex space-x-2 w-full sm:w-auto mt-2 sm:mt-0">
+                        <button onclick="loadSessionFromArchive('${s.id_sessione}')" class="flex-1 sm:flex-none bg-blue-100 text-blue-800 border-2 border-blue-500 font-bold px-4 py-2 rounded-lg hover:bg-blue-200">
+                            🔄 Carica
+                        </button>
+                        <button onclick="deleteSessionFromArchive('${s.id_sessione}')" class="flex-1 sm:flex-none bg-red-100 text-red-800 border-2 border-red-500 font-bold px-4 py-2 rounded-lg hover:bg-red-200">
+                            🗑️
+                        </button>
+                    </div>
+                </div>`;
+            });
+            listDiv.innerHTML = html;
+        }
+
+        function closeArchiveModal() {
+            document.getElementById("archiveModal").classList.add("hidden");
+        }
+
+        async function loadSessionFromArchive(id_sessione) {
+            // Se c'è lavoro in corso non salvato/archiviato, lo mettiamo in sicurezza prima della sovrascrittura
+            if (treesDatabase.length > 0) {
+                await archiveCurrentSession();
+                showToast("Dati in corso archiviati per sicurezza.");
+            }
+
+            const sessions = await getArchivedSessions();
+            const sessionToLoad = sessions.find(s => s.id_sessione === id_sessione);
+            
+            if (sessionToLoad) {
+                // Svuota la scrivania
+                await clearActiveDB();
+                
+                // Mette la sessione storica sulla scrivania (sia in RAM che nella tabella di lavoro)
+                treesDatabase = sessionToLoad.data;
+                for (const tree of treesDatabase) {
+                    await saveToLocalDB(tree);
+                }
+                
+                updateNextId();
+                document.getElementById("recordCount").innerText = treesDatabase.length;
+                renderTreeList();
+                closeArchiveModal();
+                showToast(`Sessione del ${sessionToLoad.data_creazione} caricata con successo!`);
+            }
+        }
+
+        async function deleteSessionFromArchive(id_sessione) {
+            if(!confirm("Cancellare definitivamente questa sessione dall'Archivio Storico? I PDF e le FOTO connesse andranno perse per sempre.")) return;
+            
+            if (!localDB) return;
+            return new Promise((resolve) => {
+                const transaction = localDB.transaction([archiveStoreName], "readwrite");
+                const store = transaction.objectStore(archiveStoreName);
+                store.delete(id_sessione).onsuccess = () => {
+                    showToast("Sessione storica eliminata dal dispositivo.");
+                    showArchiveModal(); // Ricarica la lista per aggiornare l'UI
+                    resolve(true);
+                };
+            });
         }
 
         // --- INIZIALIZZAZIONE GOOGLE MAPS DINAMICA E API KEY ---

@@ -312,10 +312,14 @@
     <div id="newSessionModal" class="fixed inset-0 bg-black bg-opacity-75 hidden flex items-center justify-center z-[120] p-4">
         <div class="bg-white rounded-lg p-6 max-w-md w-full shadow-2xl border-t-8 border-red-800">
             <h3 class="text-2xl font-black text-red-800 mb-4 uppercase">Attenzione!</h3>
-            <p class="text-gray-800 text-lg mb-6 font-medium">
+            <p class="text-gray-800 text-lg mb-4 font-medium">
                 Stai per svuotare la mappa e iniziare una nuova sessione di rilievo.<br><br>
                 I dati attualmente visibili a schermo <strong>non verranno persi</strong>, ma saranno automaticamente congelati e salvati nell'Archivio Storico del dispositivo.
             </p>
+            <div class="mb-6">
+                <label class="label-text">Assegna un nome al rilievo in corso (Opzionale)</label>
+                <input type="text" id="sessionNameInput" class="form-input mb-0" placeholder="Es. Azienda Agricola Rossi">
+            </div>
             <div class="flex flex-col space-y-3">
                 <button onclick="confirmNewSession()" class="w-full px-4 py-4 bg-red-800 text-white font-black rounded-lg hover:bg-red-900 text-xl uppercase shadow-md border-2 border-red-950">
                     Sì, Inizia Nuova Sessione
@@ -343,6 +347,44 @@
             <div class="mt-6 pt-4 border-t-2 border-gray-200">
                 <button onclick="closeArchiveModal()" class="w-full px-4 py-3 bg-gray-200 text-gray-800 border-2 border-gray-400 font-bold rounded-lg hover:bg-gray-300 text-lg uppercase shadow-sm">
                     Chiudi Archivio
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Rinomina Sessione -->
+    <div id="renameSessionModal" class="fixed inset-0 bg-black bg-opacity-75 hidden flex items-center justify-center z-[130] p-4">
+        <div class="bg-white rounded-lg p-6 max-w-md w-full shadow-2xl border-t-8 border-yellow-500">
+            <h3 class="text-2xl font-black text-yellow-600 mb-4 uppercase">Rinomina Sessione</h3>
+            <p class="text-gray-700 mb-4 font-medium">Assegna un nuovo nome a questo rilievo per riconoscerlo più facilmente nell'archivio.</p>
+            <input type="text" id="renameSessionInput" class="form-input mb-6" placeholder="Es. Contrada Lamadacqua">
+            <input type="hidden" id="renameSessionId">
+            <div class="flex flex-col space-y-3">
+                <button onclick="confirmRenameSession()" class="w-full px-4 py-4 bg-yellow-500 text-black font-black rounded-lg hover:bg-yellow-600 text-xl uppercase shadow-md border-2 border-yellow-700">
+                    Salva Nome
+                </button>
+                <button onclick="closeRenameSessionModal()" class="w-full px-4 py-3 bg-gray-200 text-gray-800 border-2 border-gray-400 font-bold rounded-lg hover:bg-gray-300 text-lg uppercase shadow-sm">
+                    Annulla
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal Conferma Cancellazione Sessione Archivio -->
+    <div id="deleteArchiveSessionModal" class="fixed inset-0 bg-black bg-opacity-75 hidden flex items-center justify-center z-[130] p-4">
+        <div class="bg-white rounded-lg p-6 max-w-md w-full shadow-2xl border-t-8 border-red-600">
+            <h3 class="text-2xl font-black text-red-600 mb-4 uppercase">Elimina Definitivamente</h3>
+            <p class="text-gray-800 text-lg mb-6 font-medium">
+                Sei sicuro di voler cancellare questa sessione dall'Archivio Storico?<br><br>
+                <strong class="text-red-700">I PDF e le FOTO connesse andranno perse per sempre.</strong>
+            </p>
+            <input type="hidden" id="deleteArchiveSessionId">
+            <div class="flex flex-col space-y-3">
+                <button onclick="confirmDeleteArchiveSession()" class="w-full px-4 py-4 bg-red-600 text-white font-black rounded-lg hover:bg-red-700 text-xl uppercase shadow-md border-2 border-red-800">
+                    Sì, Elimina Sessione
+                </button>
+                <button onclick="closeDeleteArchiveSessionModal()" class="w-full px-4 py-3 bg-gray-200 text-gray-800 border-2 border-gray-400 font-bold rounded-lg hover:bg-gray-300 text-lg uppercase shadow-sm">
+                    Annulla
                 </button>
             </div>
         </div>
@@ -443,6 +485,11 @@
         window.closeArchiveModal = closeArchiveModal;
         window.loadSessionFromArchive = loadSessionFromArchive;
         window.deleteSessionFromArchive = deleteSessionFromArchive;
+        window.renameSessionFromArchive = renameSessionFromArchive;
+        window.closeRenameSessionModal = closeRenameSessionModal;
+        window.confirmRenameSession = confirmRenameSession;
+        window.closeDeleteArchiveSessionModal = closeDeleteArchiveSessionModal;
+        window.confirmDeleteArchiveSession = confirmDeleteArchiveSession;
 
         // --- STATO DELL'APP ---
         let map;
@@ -546,6 +593,7 @@
         // --- FUNZIONALITÀ ARCHIVIO STORICO E NUOVA SESSIONE ---
         
         function showNewSessionModal() {
+            document.getElementById("sessionNameInput").value = ""; // Resetta l'input per il nome
             document.getElementById("newSessionModal").classList.remove("hidden");
         }
         function closeNewSessionModal() {
@@ -553,9 +601,11 @@
         }
         
         async function confirmNewSession() {
+            const customName = document.getElementById("sessionNameInput").value.trim();
+            
             // Se c'è lavoro in corso, prima di cancellarlo, lo blinda nell'archivio storico
             if (treesDatabase.length > 0) {
-                await archiveCurrentSession();
+                await archiveCurrentSession(customName);
             }
             
             // Svuota la RAM e la tabella di lavoro
@@ -570,15 +620,18 @@
             showToast("Nuova sessione avviata. Mappa pulita e dati archiviati.");
         }
 
-        async function archiveCurrentSession() {
+        async function archiveCurrentSession(customName = "") {
             if (!localDB || treesDatabase.length === 0) return false;
             
             const dataCorrente = new Date();
             // Fact-Checking formattazione: Estrazione giorno/ora pulita per l'identificativo visivo
             const dataString = dataCorrente.toLocaleDateString('it-IT') + " " + dataCorrente.toLocaleTimeString('it-IT', {hour: '2-digit', minute:'2-digit'});
             
+            const finalName = customName !== "" ? customName : `Rilievo del ${dataString}`;
+            
             const sessionRecord = {
                 id_sessione: dataCorrente.getTime().toString(), // ID univoco per il database
+                nome_sessione: finalName,
                 data_creazione: dataString,
                 record_count: treesDatabase.length,
                 data: JSON.parse(JSON.stringify(treesDatabase)) // Copia profonda e sganciata dell'intero database attuale
@@ -618,17 +671,21 @@
 
             let html = "";
             sessions.forEach(s => {
+                const displayName = s.nome_sessione || `Rilievo del ${s.data_creazione}`;
                 html += `
                 <div class="bg-gray-50 p-4 rounded-lg border-2 border-gray-300 flex flex-col sm:flex-row justify-between items-start sm:items-center shadow-sm">
                     <div class="mb-3 sm:mb-0">
-                        <span class="font-black text-gray-900 text-lg uppercase block">Rilievo del ${s.data_creazione}</span>
-                        <span class="font-bold text-sm text-gray-600">Alberi totali campionati: ${s.record_count}</span>
+                        <span class="font-black text-gray-900 text-lg uppercase block">${displayName}</span>
+                        <span class="font-bold text-sm text-gray-600">Alberi totali campionati: ${s.record_count} <span class="font-normal text-gray-500 ml-2">(${s.data_creazione})</span></span>
                     </div>
-                    <div class="flex space-x-2 w-full sm:w-auto mt-2 sm:mt-0">
-                        <button onclick="loadSessionFromArchive('${s.id_sessione}')" class="flex-1 sm:flex-none bg-blue-100 text-blue-800 border-2 border-blue-500 font-bold px-4 py-2 rounded-lg hover:bg-blue-200">
-                            🔄 Carica
+                    <div class="flex space-x-2 w-full sm:w-auto mt-2 sm:mt-0 flex-wrap sm:flex-nowrap gap-y-2">
+                        <button onclick="loadSessionFromArchive('${s.id_sessione}')" class="flex-1 sm:flex-none bg-blue-100 text-blue-800 border-2 border-blue-500 font-bold px-3 py-2 rounded-lg hover:bg-blue-200" title="Carica in Mappa">
+                            🔄
                         </button>
-                        <button onclick="deleteSessionFromArchive('${s.id_sessione}')" class="flex-1 sm:flex-none bg-red-100 text-red-800 border-2 border-red-500 font-bold px-4 py-2 rounded-lg hover:bg-red-200">
+                        <button onclick="renameSessionFromArchive('${s.id_sessione}')" class="flex-1 sm:flex-none bg-yellow-100 text-yellow-800 border-2 border-yellow-500 font-bold px-3 py-2 rounded-lg hover:bg-yellow-200" title="Rinomina">
+                            ✏️
+                        </button>
+                        <button onclick="deleteSessionFromArchive('${s.id_sessione}')" class="flex-1 sm:flex-none bg-red-100 text-red-800 border-2 border-red-500 font-bold px-3 py-2 rounded-lg hover:bg-red-200" title="Elimina">
                             🗑️
                         </button>
                     </div>
@@ -639,6 +696,51 @@
 
         function closeArchiveModal() {
             document.getElementById("archiveModal").classList.add("hidden");
+        }
+        
+        // --- LOGICA RINOMINA E CANCELLAZIONE ARCHIVIO STORICO ---
+        async function renameSessionFromArchive(id_sessione) {
+            const sessions = await getArchivedSessions();
+            const sessionToRename = sessions.find(s => s.id_sessione === id_sessione);
+            if (sessionToRename) {
+                document.getElementById("renameSessionId").value = id_sessione;
+                document.getElementById("renameSessionInput").value = sessionToRename.nome_sessione || "";
+                document.getElementById("renameSessionModal").classList.remove("hidden");
+            }
+        }
+
+        function closeRenameSessionModal() {
+            document.getElementById("renameSessionModal").classList.add("hidden");
+        }
+
+        async function confirmRenameSession() {
+            const id_sessione = document.getElementById("renameSessionId").value;
+            const newName = document.getElementById("renameSessionInput").value.trim();
+            
+            if (!newName) {
+                showErrorModal("Inserisci un nome valido per la sessione.");
+                return;
+            }
+
+            if (!localDB) return;
+            
+            const sessions = await getArchivedSessions();
+            const sessionToUpdate = sessions.find(s => s.id_sessione === id_sessione);
+            
+            if (sessionToUpdate) {
+                sessionToUpdate.nome_sessione = newName;
+                
+                return new Promise((resolve) => {
+                    const transaction = localDB.transaction([archiveStoreName], "readwrite");
+                    const store = transaction.objectStore(archiveStoreName);
+                    store.put(sessionToUpdate).onsuccess = () => {
+                        showToast("Nome della sessione aggiornato!");
+                        closeRenameSessionModal();
+                        showArchiveModal(); // Ricarica la lista per mostrare il nuovo nome
+                        resolve(true);
+                    };
+                });
+            }
         }
 
         async function loadSessionFromArchive(id_sessione) {
@@ -669,15 +771,26 @@
             }
         }
 
-        async function deleteSessionFromArchive(id_sessione) {
-            if(!confirm("Cancellare definitivamente questa sessione dall'Archivio Storico? I PDF e le FOTO connesse andranno perse per sempre.")) return;
-            
+        function deleteSessionFromArchive(id_sessione) {
+            // Fact-Checking: Sostituito il confirm() di sistema con modale sicura
+            document.getElementById("deleteArchiveSessionId").value = id_sessione;
+            document.getElementById("deleteArchiveSessionModal").classList.remove("hidden");
+        }
+        
+        function closeDeleteArchiveSessionModal() {
+            document.getElementById("deleteArchiveSessionModal").classList.add("hidden");
+        }
+
+        async function confirmDeleteArchiveSession() {
+            const id_sessione = document.getElementById("deleteArchiveSessionId").value;
             if (!localDB) return;
+            
             return new Promise((resolve) => {
                 const transaction = localDB.transaction([archiveStoreName], "readwrite");
                 const store = transaction.objectStore(archiveStoreName);
                 store.delete(id_sessione).onsuccess = () => {
                     showToast("Sessione storica eliminata dal dispositivo.");
+                    closeDeleteArchiveSessionModal();
                     showArchiveModal(); // Ricarica la lista per aggiornare l'UI
                     resolve(true);
                 };

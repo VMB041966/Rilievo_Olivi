@@ -189,17 +189,7 @@
                 <!-- Particella -->
                 <div>
                     <label class="label-text">Particella</label>
-                    <select id="particella" class="form-input" required>
-                        <option value="" disabled selected>Seleziona...</option>
-                        <option value="109">109</option>
-                        <option value="130">130</option>
-                        <option value="133">133</option>
-                        <option value="214">214</option>
-                        <option value="215">215</option>
-                        <option value="216">216</option>
-                        <option value="218">218</option>
-                        <option value="263">263</option>
-                    </select>
+                    <input type="text" id="particella" class="form-input" placeholder="Es. 109" required>
                 </div>
             </div>
 
@@ -209,11 +199,11 @@
                 <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div>
                         <label class="label-text text-sm">Nord (Y)</label>
-                        <input type="text" id="coordN" class="form-input mb-0" placeholder="Es. 4518163.01 m N" required>
+                        <input type="text" id="coordN" class="form-input mb-0" placeholder="Es. 4518163.01 m Nord" required>
                     </div>
                     <div>
                         <label class="label-text text-sm">Est (X)</label>
-                        <input type="text" id="coordE" class="form-input mb-0" placeholder="Es. 678763.59 m E" required>
+                        <input type="text" id="coordE" class="form-input mb-0" placeholder="Es. 678763.59 m Est" required>
                     </div>
                 </div>
             </div>
@@ -272,6 +262,11 @@
 
         <hr class="border-2 border-gray-300 my-8">
 
+        <!-- Pulsante di Salvataggio Sicurezza (Spostato in alto per evitare lo scroll) -->
+        <button type="button" class="btn mb-8 shadow-lg" onclick="forceCloudSync()" style="background-color: #0284c7; color: white; border-color: #0369a1; font-size: 1.1rem;">
+            💾 Salva Dati (Backup in memoria)
+        </button>
+
         <!-- Lista Rilievi Effettuati (Per Cancellazione) -->
         <h2 class="text-xl font-bold uppercase mb-4 text-gray-800">Rilievi Effettuati</h2>
         <div id="recordsList" class="mb-8 space-y-3">
@@ -280,9 +275,9 @@
 
         <hr class="border-2 border-gray-300 my-8">
 
-        <!-- Esportazione e Cloud -->
-        <h2 class="text-xl font-bold uppercase mb-4">Salvataggio & Esportazione</h2>
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-8">
+        <!-- Esportazione e Salvataggio -->
+        <h2 class="text-xl font-bold uppercase mb-4">Gestione Dati & Export</h2>
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
             <button type="button" class="btn btn-secondary" onclick="exportCSV()" style="font-size: 1rem;">
                 📊 Dati (.CSV)
             </button>
@@ -294,9 +289,6 @@
             </button>
             <button type="button" class="btn btn-secondary" onclick="exportMapPDF()" style="background-color: #16a34a; border-color: #14532d; font-size: 1rem;">
                 🗺️ Mappa (.PDF)
-            </button>
-            <button type="button" class="btn" onclick="forceCloudSync()" style="background-color: #0284c7; color: white; border-color: #0369a1; font-size: 1rem;">
-                ☁️ Salva su Cloud
             </button>
         </div>
     </main>
@@ -372,28 +364,6 @@
     </div>
 
     <script type="module" id="coreLogic">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, doc, setDoc, getDocs, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
-
-        // --- GESTIONE ERRORI FIREBASE OFFLINE/LOCALE ---
-        let app, auth, db;
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-        let currentUser = null;
-
-        try {
-            const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
-            if (firebaseConfig && Object.keys(firebaseConfig).length > 0) {
-                app = initializeApp(firebaseConfig);
-                auth = getAuth(app);
-                db = getFirestore(app);
-            } else {
-                console.warn("Attenzione: Configurazione Firebase Cloud non rilevata. L'App funzionerà in modalità 'Solo Locale'.");
-            }
-        } catch (e) {
-            console.error("Errore inizializzazione Firebase:", e);
-        }
-
         // Esponi le funzioni globalmente per l'HTML
         window.saveTree = saveTree;
         window.showDeleteModal = showDeleteModal;
@@ -410,91 +380,92 @@
         window.retryGpsConnection = retryGpsConnection;
         window.closeGpsPermissionModal = closeGpsPermissionModal;
         window.saveApiKeyAndLoadMap = saveApiKeyAndLoadMap;
+        window.centerMapOnTree = centerMapOnTree; // Esposizione nuova funzione di centratura
 
         // --- STATO DELL'APP ---
         let map;
         let userMarker; // Posizione GPS dell'utente
         let pinMarker;  // Posizione toccata per la nuova pianta
-        let treesDatabase = []; // Array per memorizzare i record
+        let treesDatabase = []; // Array per memorizzare i record in RAM
         let treeToDeleteId = null; // Memorizza l'ID in attesa di cancellazione
         let savedMarkers = []; // Array per i marker gialli delle piante già salvate
         let currentClickLatLng = null; // Memorizza Lat/Lng reali al momento del tocco sulla mappa
 
-        // --- AUTENTICAZIONE E CLOUD LOAD ---
-        async function initAuth() {
-            if (!auth) return; // Se Firebase non è configurato, salta
-            try {
-                if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
-                    await signInWithCustomToken(auth, __initial_auth_token);
-                } else {
-                    await signInAnonymously(auth);
-                }
-            } catch (error) {
-                console.error("Errore Autenticazione:", error);
-            }
-        }
+        // --- GESTIONE DATABASE LOCALE (INDEXED DB - OFFLINE FIRST) ---
+        // IndexedDB è perfetto per salvare enormi quantità di dati (come le foto Base64) 
+        // permanentemente all'interno della memoria fisica del browser, svincolandoci dal Cloud.
+        const dbName = "OliviDB";
+        const storeName = "rilievi";
+        let localDB;
 
-        if (auth) {
-            onAuthStateChanged(auth, (user) => {
-                currentUser = user;
-                if (user) {
-                    loadFromCloud();
-                }
+        function initLocalDB() {
+            return new Promise((resolve, reject) => {
+                const request = indexedDB.open(dbName, 1);
+                request.onerror = (event) => {
+                    console.error("Errore apertura IndexedDB", event);
+                    reject("Errore IndexedDB");
+                };
+                request.onsuccess = (event) => {
+                    localDB = event.target.result;
+                    resolve();
+                };
+                request.onupgradeneeded = (event) => {
+                    localDB = event.target.result;
+                    // Se non esiste, crea la "tabella" usando 'id' come chiave primaria
+                    if (!localDB.objectStoreNames.contains(storeName)) {
+                        localDB.createObjectStore(storeName, { keyPath: "id" });
+                    }
+                };
             });
         }
 
-        async function loadFromCloud() {
-            if (!currentUser || !db) return;
-            try {
-                showToast("Caricamento dati Cloud in corso...");
-                const rilieviRef = collection(db, 'artifacts', appId, 'users', currentUser.uid, 'rilievi_olivi');
-                const snapshot = await getDocs(rilieviRef);
-                if (!snapshot.empty) {
-                    treesDatabase = [];
-                    snapshot.forEach(doc => {
-                        treesDatabase.push(doc.data());
-                    });
-                    
-                    updateNextId();
-                    document.getElementById("recordCount").innerText = treesDatabase.length;
-                    renderTreeList();
-                    showToast("Dati Cloud recuperati con successo.");
-                }
-            } catch (e) {
-                console.error("Errore lettura Cloud:", e);
-                showToast("Impossibile caricare dal Cloud.");
-            }
+        async function saveToLocalDB(record) {
+            if (!localDB) return false;
+            return new Promise((resolve, reject) => {
+                const transaction = localDB.transaction([storeName], "readwrite");
+                const store = transaction.objectStore(storeName);
+                const request = store.put(record); // put aggiunge o sovrascrive
+                request.onsuccess = () => resolve(true);
+                request.onerror = () => reject(false);
+            });
         }
 
-        async function saveTreeToCloud(treeRecord) {
-            if (!currentUser || !db) return false;
-            try {
-                const docRef = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'rilievi_olivi', treeRecord.id);
-                await setDoc(docRef, treeRecord);
-                return true;
-            } catch (e) {
-                console.error("Errore scrittura Cloud:", e);
-                return false;
-            }
+        async function loadFromLocalDB() {
+            if (!localDB) return [];
+            return new Promise((resolve, reject) => {
+                const transaction = localDB.transaction([storeName], "readonly");
+                const store = transaction.objectStore(storeName);
+                const request = store.getAll();
+                request.onsuccess = () => resolve(request.result);
+                request.onerror = () => reject([]);
+            });
         }
 
+        async function deleteFromLocalDB(id) {
+            if (!localDB) return false;
+            return new Promise((resolve, reject) => {
+                const transaction = localDB.transaction([storeName], "readwrite");
+                const store = transaction.objectStore(storeName);
+                const request = store.delete(id);
+                request.onsuccess = () => resolve(true);
+                request.onerror = () => reject(false);
+            });
+        }
+
+        // Forza un salvataggio manuale di tutta la RAM nel disco locale
         async function forceCloudSync() {
-            if (!currentUser || !db) {
-                showErrorModal("Database Cloud non configurato in questo ambiente. Sincronizzazione fallita.");
-                return;
-            }
             if (treesDatabase.length === 0) {
                 showToast("Nessun dato da sincronizzare.");
                 return;
             }
 
-            showToast("Sincronizzazione di massa in corso...");
+            showToast("Salvataggio su disco in corso...");
             let count = 0;
             for (const tree of treesDatabase) {
-                const success = await saveTreeToCloud(tree);
+                const success = await saveToLocalDB(tree);
                 if(success) count++;
             }
-            showToast(`Sincronizzazione completata: ${count}/${treesDatabase.length} record sul Cloud.`);
+            showToast(`Salvataggio completato: ${count}/${treesDatabase.length} record in memoria protetta.`);
         }
 
         // --- INIZIALIZZAZIONE GOOGLE MAPS DINAMICA E API KEY ---
@@ -590,7 +561,7 @@
             // Avvia la geolocalizzazione GPS in real-time
             startGPS();
             
-            // Renderizza i marker delle piante salvate (nel caso in cui il Cloud abbia caricato prima della Mappa)
+            // Renderizza i marker delle piante salvate 
             renderSavedTreeMarkers();
         }
 
@@ -733,13 +704,13 @@
             // Esecuzione conversione
             const utmCoords = proj4(projWGS84, projUTM, [lng, lat]);
             
-            // Regola di formattazione: Punto per i decimali, Nessun separatore migliaia, Suffisso " m E" / " m N"
+            // Regola di formattazione: Punto per i decimali, Nessun separatore migliaia, Suffisso " m Est" / " m Nord"
             // utmCoords[0] è Easting (X), utmCoords[1] è Northing (Y)
             const easting = utmCoords[0].toFixed(2);
             const northing = utmCoords[1].toFixed(2);
 
-            document.getElementById("coordE").value = `${easting} m E`;
-            document.getElementById("coordN").value = `${northing} m N`;
+            document.getElementById("coordE").value = `${easting} m Est`;
+            document.getElementById("coordN").value = `${northing} m Nord`;
         }
 
         // --- GESTIONE FOTOGRAFIA (CON COMPRESSIONE AUTOMATICA) ---
@@ -838,7 +809,7 @@
                 monumentalita: monumentalita,
                 ambiente: ambiente,
                 foto_nome: photoName,
-                foto_dati: photoData // Salvato in memoria per il PDF e Cloud
+                foto_dati: photoData // Salvato in memoria per il PDF
             };
 
             treesDatabase.push(treeRecord);
@@ -846,7 +817,7 @@
             // Aggiornamento UI
             updateNextId();
             document.getElementById("recordCount").innerText = treesDatabase.length;
-            renderTreeList(); // Questo ora ridisegnerà anche i pallini gialli sulla mappa
+            renderTreeList(); // Questo ora ridisegnerà anche i pallini sulla mappa
             
             // Reset Campi Mappa e Foto
             document.getElementById("coordN").value = "";
@@ -860,13 +831,13 @@
             pinMarker = null;
             currentClickLatLng = null; // Resetta le coordinate del tocco
 
-            // Notifica Salvataggio Locale ed Esecuzione Salvataggio Cloud in Background
-            showToast("Salvataggio in locale. Sincronizzazione in corso...");
-            const cloudSuccess = await saveTreeToCloud(treeRecord);
-            if (cloudSuccess) {
-                showToast("Pianta " + id + " salvata correttamente su Database e Cloud!");
+            // Notifica Salvataggio Locale Permanente su IndexedDB
+            showToast("Salvataggio permanente in memoria in corso...");
+            const saveSuccess = await saveToLocalDB(treeRecord);
+            if (saveSuccess) {
+                showToast("Pianta " + id + " salvata in modo sicuro sul dispositivo!");
             } else {
-                showToast("Salvato in locale. Cloud non configurato, usa 'Salva su Cloud' più tardi.");
+                showToast("Errore durante la scrittura nella memoria fisica del dispositivo.");
             }
             
             window.scrollTo(0, 0);
@@ -898,28 +869,75 @@
                 let html = '';
                 sortedTreesDesc.forEach(tree => {
                     html += `
-                    <div class="flex justify-between items-center bg-white p-3 border-2 border-gray-300 rounded-lg shadow-sm">
-                        <div>
+                    <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center bg-white p-3 border-2 border-gray-300 rounded-lg shadow-sm">
+                        <div class="mb-3 sm:mb-0 w-full sm:w-auto">
                             <span class="font-bold text-lg text-gray-900">Pianta ${tree.id}</span>
                             <span class="text-sm font-semibold text-gray-600 block mt-1">${tree.comune} | Fg. ${tree.foglio} | Part. ${tree.particella} <br> Coord: ${tree.coord_n} / ${tree.coord_e}</span>
                         </div>
-                        <button type="button" onclick="showDeleteModal('${tree.id}')" class="bg-red-100 text-red-700 border-2 border-red-300 font-bold px-4 py-3 rounded-lg active:bg-red-200">
-                            🗑️ Elimina
-                        </button>
+                        <div class="flex space-x-2 w-full sm:w-auto mt-2 sm:mt-0">
+                            <button type="button" onclick="centerMapOnTree('${tree.id}')" class="flex-1 sm:flex-none bg-green-100 text-green-800 border-2 border-green-500 font-bold px-3 py-2 rounded-lg active:bg-green-200 flex justify-center items-center shadow-sm">
+                                🎯 Centra
+                            </button>
+                            <button type="button" onclick="showDeleteModal('${tree.id}')" class="flex-1 sm:flex-none bg-red-100 text-red-700 border-2 border-red-300 font-bold px-3 py-2 rounded-lg active:bg-red-200 flex justify-center items-center shadow-sm">
+                                🗑️ Elimina
+                            </button>
+                        </div>
                     </div>`;
                 });
                 listContainer.innerHTML = html;
             }
 
-            // Contestualmente all'aggiornamento della lista, aggiorniamo i "pallini gialli" in mappa
+            // Contestualmente all'aggiornamento della lista, aggiorniamo i "pallini" in mappa
             renderSavedTreeMarkers();
         }
 
-        // Funzione per disegnare i Marker Gialli delle piante già censite
+        // --- FUNZIONE CENTRATURA MAPPA SU SINGOLA PIANTA ---
+        function centerMapOnTree(id) {
+            if (!map) return;
+            
+            const tree = treesDatabase.find(t => t.id === id);
+            if (!tree) return;
+
+            let targetPos = null;
+
+            // Se abbiamo le coordinate WGS84 pure (piante rilevate nativamente)
+            if (tree.lat && tree.lng) {
+                targetPos = { lat: tree.lat, lng: tree.lng };
+            } 
+            // Fallback: conversione inversa da UTM (per rilievi storici privi di Lat/Lng palese)
+            else if (tree.coord_e && tree.coord_n) {
+                const e = parseFloat(tree.coord_e);
+                const n = parseFloat(tree.coord_n);
+                if (!isNaN(e) && !isNaN(n)) {
+                    const projWGS84 = "+proj=longlat +datum=WGS84 +no_defs";
+                    const projUTM = `+proj=utm +zone=33 +datum=WGS84 +units=m +no_defs`;
+                    try {
+                        const wgsCoords = proj4(projUTM, projWGS84, [e, n]);
+                        targetPos = { lat: wgsCoords[1], lng: wgsCoords[0] };
+                    } catch (err) {
+                        console.error("Errore fallback conversione", err);
+                    }
+                }
+            }
+
+            if (targetPos) {
+                // Centra e fa uno zoom molto spinto (livello 21) per isolare visivamente la pianta selezionata
+                map.setCenter(targetPos);
+                map.setZoom(21);
+                
+                // Scrolling fluido verso l'inizio della pagina (la mappa)
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+                showToast(`Mappa centrata sulla Pianta ${tree.id}`);
+            } else {
+                showErrorModal("Impossibile calcolare le coordinate per centrare la mappa.");
+            }
+        }
+
+        // Funzione per disegnare i Marker delle piante già censite
         function renderSavedTreeMarkers() {
             if (!map) return; // Mappa non ancora pronta
 
-            // 1. Pulisce tutti i marker gialli attualmente disegnati
+            // 1. Pulisce tutti i marker attualmente disegnati
             savedMarkers.forEach(marker => marker.setMap(null));
             savedMarkers = [];
 
@@ -949,12 +967,12 @@
                     }
                 }
 
-                // Se abbiamo ottenuto una posizione valida, posizioniamo il pallino giallo
+                // Se abbiamo ottenuto una posizione valida, posizioniamo il marker
                 if (positionForMarker) {
                     const marker = new google.maps.Marker({
                         position: positionForMarker,
                         map: map,
-                        icon: createTreeMarkerIcon(tree.id), // Utilizzo icona vettoriale semplificata e ravvicinata
+                        icon: createTreeMarkerIcon(tree.id, tree.monumentalita), // Passaggio della monumentalità per colore cromatico
                         title: `Pianta ${tree.id} - Particella ${tree.particella}`,
                         clickable: false // FONDAMENTALE: Rende l'etichetta vettoriale inerte al tocco, permettendo di cliccare la mappa "attraverso" di essa
                     });
@@ -963,27 +981,32 @@
             });
         }
 
-        // --- GENERATORE DI ICONE VETTORIALI SEMPLIFICATE ---
-        function createTreeMarkerIcon(id) {
+        // --- GENERATORE DI ICONE VETTORIALI SEMPLIFICATE E COLORATE ---
+        function createTreeMarkerIcon(id, monumentalita) {
             // Forza rigorosamente la numerazione nel formato 000 (es. 001, 015, 120) a prescindere dal tipo di dato originario
             const displayId = String(id).padStart(3, '0');
 
             const fontSize = 11;
-            const radius = 4; // Dimensione del pallino
+            const radius = 4; // Dimensione del pallino fissa e invariata
             
+            // Fact-Checking cromatico: Determina il colore in base alla monumentalità (magenta brillante se monumentale, altrimenti giallo originario)
+            const isMonumentale = monumentalita === "MONUMENTALE";
+            const mainColor = isMonumentale ? "#FF00FF" : "#FACC15"; // Magenta brillante / Giallo acceso
+            const strokeColor = isMonumentale ? "#4A004A" : "#854D0E"; // Bordo scuro di contrasto coordinato
+
             // Tela ultra-compatta (50x30) per mantenere il testo incollato al marker senza sbavature
             // Il centro matematico del punto di radicazione è fissato alle coordinate cx=10, cy=15
             // L'etichetta di testo parte da x=16, quindi a soli 2 pixel dal bordo del pallino (10+4=14)
             const svg = `
                 <svg width="50" height="30" viewBox="0 0 50 30" xmlns="http://www.w3.org/2000/svg">
-                    <!-- Pallino Base Giallo -->
-                    <circle cx="10" cy="15" r="${radius}" fill="#FACC15" stroke="#854D0E" stroke-width="1.5"/>
+                    <!-- Pallino Base -->
+                    <circle cx="10" cy="15" r="${radius}" fill="${mainColor}" stroke="${strokeColor}" stroke-width="1.5"/>
                     
                     <!-- Traccia nera per stacco visivo del testo (anti-collisione visiva sui colori chiari) -->
                     <text x="16" y="19" fill="none" font-family="system-ui, -apple-system, sans-serif" font-size="${fontSize}" font-weight="900" text-anchor="start" stroke="#000000" stroke-width="3" stroke-linejoin="round">${displayId}</text>
                     
-                    <!-- Testo giallo -->
-                    <text x="16" y="19" fill="#FACC15" font-family="system-ui, -apple-system, sans-serif" font-size="${fontSize}" font-weight="900" text-anchor="start">${displayId}</text>
+                    <!-- Testo principale (Giallo o Magenta) -->
+                    <text x="16" y="19" fill="${mainColor}" font-family="system-ui, -apple-system, sans-serif" font-size="${fontSize}" font-weight="900" text-anchor="start">${displayId}</text>
                 </svg>
             `;
             
@@ -1016,18 +1039,12 @@
                 updateNextId(); 
                 closeDeleteModal();
 
-                // Cancellazione dal Cloud
-                if (currentUser && db) {
-                    try {
-                        const docRef = doc(db, 'artifacts', appId, 'users', currentUser.uid, 'rilievi_olivi', treeToDeleteId);
-                        await deleteDoc(docRef);
-                        showToast("Rilievo " + treeToDeleteId + " cancellato da Locale e Cloud.");
-                    } catch (e) {
-                        console.error("Errore cancellazione Cloud:", e);
-                        showToast("Rilievo cancellato localmente, ma errore sul Cloud.");
-                    }
+                // Cancellazione Permanente in IndexedDB
+                if (localDB) {
+                    await deleteFromLocalDB(treeToDeleteId);
+                    showToast("Rilievo " + treeToDeleteId + " cancellato in modo definitivo.");
                 } else {
-                    showToast("Rilievo " + treeToDeleteId + " cancellato localmente.");
+                    showToast("Rilievo cancellato solo in sessione.");
                 }
             }
         });
@@ -1096,10 +1113,13 @@
             doc.text("Classificazione olivi ai sensi dell’Art. 2 della Legge Regione Puglia 4 giugno 2007, n. 14", 14, 20);
             doc.setFontSize(11);
             const dateStr = new Date().toLocaleDateString('it-IT');
-            doc.text(`Data Rilievo: ${dateStr} - Totale Piante: ${treesDatabase.length}`, 14, 28);
+            
+            // Calcolo numero piante monumentali per l'intestazione
+            const countMonumentali = treesDatabase.filter(t => t.monumentalita === "MONUMENTALE").length;
+            doc.text(`Data Rilievo: ${dateStr} - Totale Piante: ${treesDatabase.length} di cui Monumentali: ${countMonumentali}`, 14, 28);
             
             // Tabella Riepilogativa tramite autoTable
-            const tableColumn = ["ID", "Comune", "Fg.", "Part.", "Nord (UTM)", "Est (UTM)", "Classe Diametrica", "Stato", "Ambiente"];
+            const tableColumn = ["ID", "Comune", "Fg.", "Part.", "Nord (UTM)", "Est (UTM)", "Classe Diametrica", "Monumentalità", "Ambiente"];
             const tableRows = [];
 
             treesDatabase.forEach(tree => {
@@ -1122,7 +1142,18 @@
                 body: tableRows,
                 startY: 35,
                 styles: { fontSize: 8, cellPadding: 2 },
-                headStyles: { fillColor: [22, 163, 74] } // Verde Agronomo
+                headStyles: { fillColor: [22, 163, 74] }, // Verde Agronomo
+                // Hook per intercettare la riga e colorare l'intero record se l'olivo è Monumentale
+                didParseCell: function(data) {
+                    if (data.section === 'body') {
+                        // L'indice 7 corrisponde alla colonna "Monumentalità"
+                        const status = data.row.raw[7]; 
+                        if (status === "MONUMENTALE") {
+                            data.cell.styles.textColor = [220, 38, 38]; // Rosso acceso
+                            data.cell.styles.fontStyle = 'bold'; // Grassetto per garantire massima leggibilità tecnica
+                        }
+                    }
+                }
             });
 
             // Opzionale: Aggiunta schede fotografiche se presenti
@@ -1148,15 +1179,48 @@
                 doc.text(`Scheda Pianta ID: ${tree.id}`, centerX, 20, { align: 'center' });
                 
                 doc.setFontSize(10);
-                doc.text(`Comune: ${tree.comune} - Fg: ${tree.foglio} - Part: ${tree.particella}`, centerX, 28, { align: 'center' });
-                doc.text(`Coordinate: ${tree.coord_n} / ${tree.coord_e}`, centerX, 34, { align: 'center' });
-                doc.text(`File: ${tree.foto_nome}`, centerX, 40, { align: 'center' });
+                doc.text(`Classe Diametrica: ${tree.classe_diametrica}`, centerX, 26, { align: 'center' });
+                
+                const monumLabel = "Monumentalità: ";
+                const monumValue = tree.monumentalita ? tree.monumentalita.toUpperCase() : "ND";
+                
+                if (monumValue === "MONUMENTALE") {
+                    // Calcolo larghezze per centrare il blocco di testo misto (Normal + Bold/Red)
+                    doc.setFont("helvetica", "normal");
+                    const wLabel = doc.getTextWidth(monumLabel);
+                    doc.setFont("helvetica", "bold");
+                    const wValue = doc.getTextWidth(monumValue);
+                    const startX = centerX - ((wLabel + wValue) / 2);
+                    
+                    // Stampa etichetta standard (Nero, Normale)
+                    doc.setFont("helvetica", "normal");
+                    doc.setTextColor(0, 0, 0);
+                    doc.text(monumLabel, startX, 32);
+                    
+                    // Stampa valore evidenziato (Rosso, Grassetto)
+                    doc.setFont("helvetica", "bold");
+                    doc.setTextColor(220, 38, 38); // Rosso acceso
+                    doc.text(monumValue, startX + wLabel, 32);
+                    
+                    // Ripristino parametri per i testi successivi
+                    doc.setFont("helvetica", "normal");
+                    doc.setTextColor(0, 0, 0);
+                } else {
+                    // Stampa standard per NON MONUMENTALE
+                    doc.setFont("helvetica", "normal");
+                    doc.setTextColor(0, 0, 0);
+                    doc.text(`${monumLabel}${monumValue}`, centerX, 32, { align: 'center' });
+                }
+                
+                doc.text(`Comune: ${tree.comune} - Fg: ${tree.foglio} - Part: ${tree.particella}`, centerX, 38, { align: 'center' });
+                doc.text(`Coordinate: ${tree.coord_n} / ${tree.coord_e}`, centerX, 44, { align: 'center' });
+                doc.text(`File: ${tree.foto_nome}`, centerX, 50, { align: 'center' });
                 
                 try {
                     // Previene lo stretching calcolando le proporzioni reali dell'immagine
                     const imgProps = doc.getImageProperties(tree.foto_dati);
                     const pdfMaxWidth = 135; // Spazio orizzontale max per mezza pagina (con margini)
-                    const pdfMaxHeight = 150; // Spazio verticale max per la foto
+                    const pdfMaxHeight = 140; // Ricalibrato (ridotto da 150) per ospitare i nuovi righi di testo
                     
                     // Calcola il rapporto di scala necessario per far rientrare l'immagine nel riquadro massimo
                     const ratio = Math.min(pdfMaxWidth / imgProps.width, pdfMaxHeight / imgProps.height);
@@ -1167,7 +1231,7 @@
                     
                     // Calcolo posizionamento Y e X per centrare l'immagine nel riquadro
                     const imgX = centerX - (finalWidth / 2);
-                    const boxCenterY = 45 + (pdfMaxHeight / 2); // Centro dell'area dedicata alla foto
+                    const boxCenterY = 55 + (pdfMaxHeight / 2); // Centro dell'area dedicata alla foto (spostato verso il basso)
                     const imgY = boxCenterY - (finalHeight / 2);
                     
                     // 1. Disegna l'ombreggiatura (rettangolo grigio chiaro spostato in basso a destra)
@@ -1184,7 +1248,7 @@
                     
                 } catch(e) {
                     console.log("Errore inserimento immagine per ID", tree.id, e);
-                    doc.text("Errore rendering immagine.", centerX, 55, { align: 'center' });
+                    doc.text("Errore rendering immagine.", centerX, 65, { align: 'center' });
                 }
             }
 
@@ -1289,7 +1353,10 @@
                 doc.text("Planimetria Rilievi - Classificazione olivi (L.R. Puglia 14/2007)", 14, 20);
                 doc.setFontSize(11);
                 const dateStr = new Date().toLocaleDateString('it-IT');
-                doc.text(`Data: ${dateStr} - Totale Piante: ${treesDatabase.length}`, 14, 28);
+                
+                // Calcolo numero piante monumentali per l'intestazione
+                const countMonumentali = treesDatabase.filter(t => t.monumentalita === "MONUMENTALE").length;
+                doc.text(`Data: ${dateStr} - Totale Piante: ${treesDatabase.length} di cui Monumentali: ${countMonumentali}`, 14, 28);
 
                 // Inserimento Immagine Mappa
                 // Dimensioni foglio A4 landscape: 297 x 210 mm
@@ -1369,11 +1436,26 @@
         }
 
         // Setup iniziale all'apertura
-        window.onload = function() {
+        window.onload = async function() {
             setAppVersion(); // Imposta la versione dinamicamente in base al codice
+            
+            // Inizializza il DB Locale Permanente PRIMA di mostrare i dati
+            try {
+                await initLocalDB();
+                const savedRecords = await loadFromLocalDB();
+                if (savedRecords && savedRecords.length > 0) {
+                    treesDatabase = savedRecords; // Carica la memoria protetta nella RAM
+                    showToast("Dati recuperati dalla memoria del dispositivo.");
+                }
+            } catch (e) {
+                console.error("Errore avvio DB Locale:", e);
+                showToast("Errore di inizializzazione memoria locale.");
+            }
+
             updateNextId();
+            document.getElementById("recordCount").innerText = treesDatabase.length;
             renderTreeList();
-            initAuth(); // Avvia autenticazione e caricamento Cloud
+            
             loadGoogleMapsScript(); // Avvia caricamento Mappa dinamicamente
         };
 

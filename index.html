@@ -425,6 +425,90 @@
         </div>
     </div>
 
+    <!-- Modal Modifica Rilievo -->
+    <div id="editModal" class="fixed inset-0 bg-black bg-opacity-75 hidden flex items-center justify-center z-[140] p-4">
+        <div class="bg-white rounded-lg p-6 max-w-lg w-full max-h-[90vh] overflow-y-auto shadow-2xl border-t-8 border-yellow-500">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-2xl font-black text-gray-900 uppercase">Modifica ID: <span id="editTreeIdDisplay" class="text-yellow-600"></span></h3>
+                <button onclick="closeEditModal()" class="text-gray-500 hover:text-gray-800 text-3xl font-bold">&times;</button>
+            </div>
+            
+            <form id="editTreeForm" onsubmit="event.preventDefault(); saveEditedTree();">
+                <input type="hidden" id="editTreeId">
+                
+                <div class="grid grid-cols-2 gap-4 mb-4">
+                    <div>
+                        <label class="label-text text-sm text-gray-500">Comune</label>
+                        <input type="text" id="editComune" class="form-input mb-0" required>
+                    </div>
+                    <div>
+                        <label class="label-text text-sm text-gray-500">Foglio</label>
+                        <input type="text" id="editFoglio" class="form-input mb-0" required>
+                    </div>
+                </div>
+                
+                <div class="mb-4">
+                    <label class="label-text text-sm text-gray-500">Particella</label>
+                    <input type="text" id="editParticella" class="form-input mb-0" required>
+                </div>
+
+                <div class="bg-gray-100 p-3 rounded-lg border-2 border-gray-300 mb-4">
+                    <h4 class="font-bold text-gray-700 text-xs mb-2 uppercase text-center">Coordinate Geografiche (Blindate)</h4>
+                    <div class="grid grid-cols-2 gap-4">
+                        <input type="text" id="editCoordN" class="form-input mb-0 text-xs bg-gray-200 text-gray-500 cursor-not-allowed text-center" readonly title="Coordinata Nord non modificabile">
+                        <input type="text" id="editCoordE" class="form-input mb-0 text-xs bg-gray-200 text-gray-500 cursor-not-allowed text-center" readonly title="Coordinata Est non modificabile">
+                    </div>
+                </div>
+
+                <div class="mb-4">
+                    <label class="label-text text-sm text-gray-500">Classe Diametrica</label>
+                    <select id="editClasseDiametrica" class="form-input mb-0" required>
+                        <option value="inf. a 70 cm">inf. a 70 cm</option>
+                        <option value="sup. o uguale a 70 cm e inf. a 100 cm">sup. o uguale a 70 cm e inf. a 100 cm</option>
+                        <option value="uguale o sup. a 100 cm">uguale o sup. a 100 cm</option>
+                    </select>
+                </div>
+
+                <div class="mb-4">
+                    <label class="label-text text-sm text-gray-500">Monumentalità</label>
+                    <select id="editMonumentalita" class="form-input mb-0" required>
+                        <option value="MONUMENTALE">MONUMENTALE</option>
+                        <option value="NON MONUMENTALE">NON MONUMENTALE</option>
+                    </select>
+                </div>
+
+                <div class="mb-4">
+                    <label class="label-text text-sm text-gray-500">Ambiente</label>
+                    <select id="editAmbiente" class="form-input mb-0" required>
+                        <option value="AGRARIO">AGRARIO</option>
+                        <option value="PERIURBANO">PERIURBANO</option>
+                        <option value="URBANO">URBANO</option>
+                    </select>
+                </div>
+
+                <div class="mb-4">
+                    <label class="label-text text-sm text-gray-500">Note</label>
+                    <input type="text" id="editNote" class="form-input mb-0">
+                </div>
+
+                <div class="bg-gray-100 p-3 rounded-lg border-2 border-gray-300 mb-6">
+                    <h4 class="font-bold text-gray-700 text-xs mb-2 uppercase text-center">Fotografia (Blindata)</h4>
+                    <img id="editPhotoPreview" alt="Anteprima Foto" class="rounded-lg border border-gray-400 max-h-32 object-cover w-full opacity-80 cursor-not-allowed" title="La fotografia originaria non è modificabile">
+                    <p id="editPhotoNameDisplay" class="text-xs font-bold mt-2 text-gray-500 text-center break-all"></p>
+                </div>
+
+                <div class="flex flex-col space-y-3">
+                    <button type="submit" class="w-full px-4 py-4 bg-yellow-500 text-black font-black rounded-lg hover:bg-yellow-600 text-xl uppercase shadow-md border-2 border-yellow-700">
+                        💾 Aggiorna Rilievo
+                    </button>
+                    <button type="button" onclick="closeEditModal()" class="w-full px-4 py-3 bg-gray-200 text-gray-800 border-2 border-gray-400 font-bold rounded-lg hover:bg-gray-300 text-lg uppercase shadow-sm">
+                        Annulla
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+
     <!-- Modal Conferma Cancellazione -->
     <div id="deleteModal" class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center z-[100]">
         <div class="bg-white rounded-lg p-6 max-w-sm w-full mx-4 shadow-xl border-t-4 border-red-600">
@@ -503,6 +587,9 @@
         window.saveApiKeyAndLoadMap = saveApiKeyAndLoadMap;
         window.centerMapOnTree = centerMapOnTree;
         window.zoomToAllMarkers = zoomToAllMarkers; // Esposizione nuova funzione
+        window.editTree = editTree;
+        window.closeEditModal = closeEditModal;
+        window.saveEditedTree = saveEditedTree;
         
         // Esponi funzioni di gestione sessione
         window.showNewSessionModal = showNewSessionModal;
@@ -1163,6 +1250,63 @@
             window.scrollTo(0, 0);
         }
 
+        // --- FUNZIONALITA' DI MODIFICA RILIEVO ---
+        function editTree(id) {
+            const tree = treesDatabase.find(t => t.id === id);
+            if(!tree) return;
+            
+            // Popola i campi della modale di modifica
+            document.getElementById("editTreeId").value = tree.id;
+            document.getElementById("editTreeIdDisplay").innerText = tree.id;
+            
+            document.getElementById("editComune").value = tree.comune;
+            document.getElementById("editFoglio").value = tree.foglio;
+            document.getElementById("editParticella").value = tree.particella;
+            document.getElementById("editClasseDiametrica").value = tree.classe_diametrica;
+            document.getElementById("editMonumentalita").value = tree.monumentalita;
+            document.getElementById("editAmbiente").value = tree.ambiente;
+            document.getElementById("editNote").value = tree.note || "";
+            
+            document.getElementById("editCoordN").value = tree.coord_n;
+            document.getElementById("editCoordE").value = tree.coord_e;
+            
+            // Preparazione preview fotografica corrente (immodificabile)
+            document.getElementById("editPhotoPreview").src = tree.foto_dati;
+            document.getElementById("editPhotoNameDisplay").innerText = "File vincolato: " + tree.foto_nome;
+
+            document.getElementById("editModal").classList.remove("hidden");
+        }
+
+        function closeEditModal() {
+            document.getElementById("editModal").classList.add("hidden");
+        }
+
+        async function saveEditedTree() {
+            const id = document.getElementById("editTreeId").value;
+            const treeIndex = treesDatabase.findIndex(t => t.id === id);
+            if(treeIndex === -1) return;
+
+            const tree = treesDatabase[treeIndex];
+            
+            // Aggiorna solo i dati consentiti (ID, Coordinate e Foto restano intatti)
+            tree.comune = document.getElementById("editComune").value;
+            tree.foglio = document.getElementById("editFoglio").value;
+            tree.particella = document.getElementById("editParticella").value;
+            tree.classe_diametrica = document.getElementById("editClasseDiametrica").value;
+            tree.monumentalita = document.getElementById("editMonumentalita").value;
+            tree.ambiente = document.getElementById("editAmbiente").value;
+            tree.note = document.getElementById("editNote").value;
+
+            treesDatabase[treeIndex] = tree;
+            
+            showToast("Aggiornamento in corso...");
+            await saveToLocalDB(tree);
+            
+            renderTreeList(); // Aggiorna sia la lista che i colori dei marker in mappa!
+            closeEditModal();
+            showToast("Rilievo " + id + " aggiornato con successo!");
+        }
+
         // --- GESTIONE RECORD E MAPPA ---
         function updateNextId() {
             const usedIds = treesDatabase.map(t => parseInt(t.id, 10)).sort((a,b) => a - b);
@@ -1193,6 +1337,9 @@
                             <span class="text-sm font-semibold text-gray-600 block mt-1">${tree.comune} | Fg. ${tree.foglio} | Part. ${tree.particella} <br> Coord: ${tree.coord_n} / ${tree.coord_e}</span>
                         </div>
                         <div class="flex space-x-2 w-full sm:w-auto mt-2 sm:mt-0">
+                            <button type="button" onclick="editTree('${tree.id}')" class="flex-1 sm:flex-none bg-yellow-100 text-yellow-800 border-2 border-yellow-500 font-bold px-3 py-2 rounded-lg active:bg-yellow-200 flex justify-center items-center shadow-sm">
+                                ✏️ Modifica
+                            </button>
                             <button type="button" onclick="centerMapOnTree('${tree.id}')" class="flex-1 sm:flex-none bg-green-100 text-green-800 border-2 border-green-500 font-bold px-3 py-2 rounded-lg active:bg-green-200 flex justify-center items-center shadow-sm">
                                 🎯 Centra
                             </button>
@@ -1355,16 +1502,21 @@
 
         document.getElementById("confirmDeleteBtn").addEventListener("click", async () => {
             if (treeToDeleteId) {
-                treesDatabase = treesDatabase.filter(t => t.id !== treeToDeleteId);
+                // Salviamo l'ID in una costante locale per evitare errori asincroni
+                const idToDelete = treeToDeleteId;
+                
+                treesDatabase = treesDatabase.filter(t => t.id !== idToDelete);
                 
                 document.getElementById("recordCount").innerText = treesDatabase.length;
                 renderTreeList();
                 updateNextId(); 
+                
+                // Chiudiamo in sicurezza ora che il dato è salvato
                 closeDeleteModal();
 
                 if (localDB) {
-                    await deleteFromLocalDB(treeToDeleteId);
-                    showToast("Rilievo " + treeToDeleteId + " cancellato in modo definitivo.");
+                    await deleteFromLocalDB(idToDelete);
+                    showToast("Rilievo " + idToDelete + " cancellato in modo definitivo.");
                 } else {
                     showToast("Rilievo cancellato solo in sessione.");
                 }
@@ -1400,7 +1552,10 @@
 
             let csvContent = "ID_Pianta;Committente;Tecnico;Comune;Foglio_Mappa;Particella;Coord_Nord_UTM_WGS84;Coord_Est_UTM_WGS84;Classe_Diametrica;Monumentalita;Ambiente;Note;Nome_File_Foto\n";
 
-            treesDatabase.forEach(row => {
+            // Fact-Checking: Ordina rigorosamente i record per ID crescente prima dell'esportazione
+            const sortedTrees = [...treesDatabase].sort((a, b) => parseInt(a.id, 10) - parseInt(b.id, 10));
+
+            sortedTrees.forEach(row => {
                 const rowData = [
                     row.id,
                     row.committente,
@@ -1454,16 +1609,17 @@
                 return;
             }
 
-            let filteredTrees = treesDatabase;
+            // Fact-Checking: Ordina rigorosamente i record per ID crescente prima di filtrare e impaginare
+            let filteredTrees = [...treesDatabase].sort((a, b) => parseInt(a.id, 10) - parseInt(b.id, 10));
             let fileSuffix = "Globale";
             let reportSubtitle = "";
 
             if (filterType === 'MONUMENTALE') {
-                filteredTrees = treesDatabase.filter(t => t.monumentalita === "MONUMENTALE");
+                filteredTrees = filteredTrees.filter(t => t.monumentalita === "MONUMENTALE");
                 fileSuffix = "Solo_Monumentali";
                 reportSubtitle = "(Estratto: Piante Monumentali)";
             } else if (filterType === 'NON MONUMENTALE') {
-                filteredTrees = treesDatabase.filter(t => t.monumentalita === "NON MONUMENTALE");
+                filteredTrees = filteredTrees.filter(t => t.monumentalita === "NON MONUMENTALE");
                 fileSuffix = "Solo_Non_Monumentali";
                 reportSubtitle = "(Estratto: Piante Non Monumentali)";
             }
@@ -1658,7 +1814,9 @@
 
         // --- ESPORTAZIONE ARCHIVIO FOTO (ZIP) ---
         async function exportZIP() {
-            const treesWithPhotos = treesDatabase.filter(t => t.foto_dati);
+            // Fact-Checking: Ordina per ID crescente per garantire la corretta sequenza anche nell'estrazione dei file
+            const sortedTrees = [...treesDatabase].sort((a, b) => parseInt(a.id, 10) - parseInt(b.id, 10));
+            const treesWithPhotos = sortedTrees.filter(t => t.foto_dati);
             
             if (treesWithPhotos.length === 0) {
                 showErrorModal("Nessun rilievo con fotografia da esportare.");

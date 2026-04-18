@@ -18,7 +18,7 @@
     <!-- JSZip per esportazione foto in formato .zip -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 
-    <!-- html2canvas per esportazione mappa -->
+    <!-- html2canvas per esportazione mappa (Mantenuto come Fallback offline) -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 
     <style>
@@ -155,15 +155,27 @@
     </header>
 
     <!-- Area Mappa -->
-    <div id="map">Caricamento Mappa...</div>
+    <div class="relative w-full">
+        <div id="map">Caricamento Mappa...</div>
+        <!-- Pulsante Zoom Globale ridimensionato e riposizionato per evitare sovrapposizioni -->
+        <button type="button" onclick="zoomToAllMarkers()" class="absolute bottom-28 right-2 bg-white/90 hover:bg-white text-blue-800 border border-blue-500 font-bold px-2 py-1.5 rounded shadow-md active:bg-blue-100 z-[60] flex items-center justify-center space-x-1 transition-all" title="Adatta zoom a tutti i rilievi">
+            <span class="text-sm">🌍</span> <span class="text-[10px] sm:text-xs uppercase leading-none">Zoom Globale</span>
+        </button>
+    </div>
     <div class="bg-yellow-200 text-black text-center text-sm p-1 font-semibold border-b-2 border-yellow-400">
         Tocca la mappa per impostare o correggere le coordinate della pianta.
     </div>
 
     <!-- Container Form -->
-    <main class="p-4 max-w-3xl mx-auto">
+    <main class="p-4 max-w-3xl mx-auto mt-4">
         <form id="treeForm" onsubmit="event.preventDefault(); saveTree();">
             
+            <!-- Committente -->
+            <div class="mb-4">
+                <label class="label-text">Committente</label>
+                <input type="text" id="committente" class="form-input mb-0" placeholder="Es. Azienda Agricola Rossi S.R.L." required>
+            </div>
+
             <!-- Tecnico Rilevatore -->
             <div class="mb-4">
                 <label class="label-text">Tecnico Rilevatore</label>
@@ -240,6 +252,12 @@
                 </select>
             </div>
 
+            <!-- Note -->
+            <div class="mb-4">
+                <label class="label-text">Note (Opzionale)</label>
+                <input type="text" id="note" class="form-input mb-0" placeholder="Es. Presenza di carie, stato fitosanitario, ecc.">
+            </div>
+
             <!-- Fotografia -->
             <div class="mb-6">
                 <label class="label-text">Fotografia (Verticale 4:3)</label>
@@ -277,12 +295,18 @@
 
         <!-- Esportazione e Salvataggio -->
         <h2 class="text-xl font-bold uppercase mb-4">Gestione Dati & Export</h2>
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
+        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
             <button type="button" class="btn btn-secondary" onclick="exportCSV()" style="font-size: 1rem;">
                 📊 Dati (.CSV)
             </button>
             <button type="button" class="btn btn-secondary" onclick="exportPDF()" style="background-color: #dc2626; border-color: #991b1b; font-size: 1rem;">
-                📄 Report (.PDF)
+                📄 Report Globale (.PDF)
+            </button>
+            <button type="button" class="btn btn-secondary" onclick="exportPDFMonumentali()" style="background-color: #a21caf; border-color: #701a75; font-size: 1rem;">
+                👑 Report Monumentali (.PDF)
+            </button>
+            <button type="button" class="btn btn-secondary" onclick="exportPDFNonMonumentali()" style="background-color: #ca8a04; border-color: #854d0e; font-size: 1rem;">
+                🌿 Report Non Monumentali (.PDF)
             </button>
             <button type="button" class="btn btn-secondary" onclick="exportZIP()" style="background-color: #ea580c; border-color: #9a3412; font-size: 1rem;">
                 🖼️ Foto (.ZIP)
@@ -466,6 +490,8 @@
         window.closeErrorModal = closeErrorModal;
         window.exportCSV = exportCSV;
         window.exportPDF = exportPDF;
+        window.exportPDFMonumentali = exportPDFMonumentali;
+        window.exportPDFNonMonumentali = exportPDFNonMonumentali;
         window.exportZIP = exportZIP;
         window.exportMapPDF = exportMapPDF;
         window.handlePhoto = handlePhoto;
@@ -476,6 +502,7 @@
         window.closeGpsPermissionModal = closeGpsPermissionModal;
         window.saveApiKeyAndLoadMap = saveApiKeyAndLoadMap;
         window.centerMapOnTree = centerMapOnTree;
+        window.zoomToAllMarkers = zoomToAllMarkers; // Esposizione nuova funzione
         
         // Esponi funzioni di gestione sessione
         window.showNewSessionModal = showNewSessionModal;
@@ -508,7 +535,6 @@
 
         function initLocalDB() {
             return new Promise((resolve, reject) => {
-                // Fact-Checking: Bump versione a 2 per istruire il browser a creare la nuova tabella d'archivio senza toccare quella esistente
                 const request = indexedDB.open(dbName, 2);
                 request.onerror = (event) => {
                     console.error("Errore apertura IndexedDB", event);
@@ -520,11 +546,9 @@
                 };
                 request.onupgradeneeded = (event) => {
                     localDB = event.target.result;
-                    // Tabella di lavoro standard
                     if (!localDB.objectStoreNames.contains(storeName)) {
                         localDB.createObjectStore(storeName, { keyPath: "id" });
                     }
-                    // Tabella per lo stoccaggio storico delle sessioni complete
                     if (!localDB.objectStoreNames.contains(archiveStoreName)) {
                         localDB.createObjectStore(archiveStoreName, { keyPath: "id_sessione" });
                     }
@@ -532,7 +556,6 @@
             });
         }
 
-        // SALVATAGGIO / CARICAMENTO SESSIONE CORRENTE 
         async function saveToLocalDB(record) {
             if (!localDB) return false;
             return new Promise((resolve, reject) => {
@@ -593,7 +616,7 @@
         // --- FUNZIONALITÀ ARCHIVIO STORICO E NUOVA SESSIONE ---
         
         function showNewSessionModal() {
-            document.getElementById("sessionNameInput").value = ""; // Resetta l'input per il nome
+            document.getElementById("sessionNameInput").value = "";
             document.getElementById("newSessionModal").classList.remove("hidden");
         }
         function closeNewSessionModal() {
@@ -603,16 +626,13 @@
         async function confirmNewSession() {
             const customName = document.getElementById("sessionNameInput").value.trim();
             
-            // Se c'è lavoro in corso, prima di cancellarlo, lo blinda nell'archivio storico
             if (treesDatabase.length > 0) {
                 await archiveCurrentSession(customName);
             }
             
-            // Svuota la RAM e la tabella di lavoro
             treesDatabase = [];
             await clearActiveDB();
             
-            // Azzera la mappa e i form
             updateNextId();
             document.getElementById("recordCount").innerText = "0";
             renderTreeList();
@@ -624,17 +644,20 @@
             if (!localDB || treesDatabase.length === 0) return false;
             
             const dataCorrente = new Date();
-            // Fact-Checking formattazione: Estrazione giorno/ora pulita per l'identificativo visivo
             const dataString = dataCorrente.toLocaleDateString('it-IT') + " " + dataCorrente.toLocaleTimeString('it-IT', {hour: '2-digit', minute:'2-digit'});
             
-            const finalName = customName !== "" ? customName : `Rilievo del ${dataString}`;
+            let finalName = customName;
+            if (finalName === "") {
+                const primoCommittente = treesDatabase[0].committente;
+                finalName = primoCommittente ? `${primoCommittente} - ${dataString}` : `Rilievo del ${dataString}`;
+            }
             
             const sessionRecord = {
-                id_sessione: dataCorrente.getTime().toString(), // ID univoco per il database
+                id_sessione: dataCorrente.getTime().toString(),
                 nome_sessione: finalName,
                 data_creazione: dataString,
                 record_count: treesDatabase.length,
-                data: JSON.parse(JSON.stringify(treesDatabase)) // Copia profonda e sganciata dell'intero database attuale
+                data: JSON.parse(JSON.stringify(treesDatabase))
             };
 
             return new Promise((resolve) => {
@@ -666,7 +689,6 @@
                 return;
             }
             
-            // Ordina decrescente (le sessioni più recenti in alto)
             sessions.sort((a,b) => parseInt(b.id_sessione) - parseInt(a.id_sessione));
 
             let html = "";
@@ -698,7 +720,6 @@
             document.getElementById("archiveModal").classList.add("hidden");
         }
         
-        // --- LOGICA RINOMINA E CANCELLAZIONE ARCHIVIO STORICO ---
         async function renameSessionFromArchive(id_sessione) {
             const sessions = await getArchivedSessions();
             const sessionToRename = sessions.find(s => s.id_sessione === id_sessione);
@@ -736,7 +757,7 @@
                     store.put(sessionToUpdate).onsuccess = () => {
                         showToast("Nome della sessione aggiornato!");
                         closeRenameSessionModal();
-                        showArchiveModal(); // Ricarica la lista per mostrare il nuovo nome
+                        showArchiveModal();
                         resolve(true);
                     };
                 });
@@ -744,7 +765,6 @@
         }
 
         async function loadSessionFromArchive(id_sessione) {
-            // Se c'è lavoro in corso non salvato/archiviato, lo mettiamo in sicurezza prima della sovrascrittura
             if (treesDatabase.length > 0) {
                 await archiveCurrentSession();
                 showToast("Dati in corso archiviati per sicurezza.");
@@ -754,15 +774,21 @@
             const sessionToLoad = sessions.find(s => s.id_sessione === id_sessione);
             
             if (sessionToLoad) {
-                // Svuota la scrivania
                 await clearActiveDB();
                 
-                // Mette la sessione storica sulla scrivania (sia in RAM che nella tabella di lavoro)
                 treesDatabase = sessionToLoad.data;
                 for (const tree of treesDatabase) {
                     await saveToLocalDB(tree);
                 }
                 
+                if (treesDatabase.length > 0) {
+                    document.getElementById("committente").value = treesDatabase[0].committente || "";
+                    document.getElementById("tecnico").value = treesDatabase[0].tecnico || "";
+                } else {
+                    document.getElementById("committente").value = "";
+                    document.getElementById("tecnico").value = "";
+                }
+
                 updateNextId();
                 document.getElementById("recordCount").innerText = treesDatabase.length;
                 renderTreeList();
@@ -772,7 +798,6 @@
         }
 
         function deleteSessionFromArchive(id_sessione) {
-            // Fact-Checking: Sostituito il confirm() di sistema con modale sicura
             document.getElementById("deleteArchiveSessionId").value = id_sessione;
             document.getElementById("deleteArchiveSessionModal").classList.remove("hidden");
         }
@@ -791,7 +816,7 @@
                 store.delete(id_sessione).onsuccess = () => {
                     showToast("Sessione storica eliminata dal dispositivo.");
                     closeDeleteArchiveSessionModal();
-                    showArchiveModal(); // Ricarica la lista per aggiornare l'UI
+                    showArchiveModal();
                     resolve(true);
                 };
             });
@@ -827,7 +852,6 @@
             script.async = true;
             script.defer = true;
             
-            // Gestione errore di rete nel caricamento dello script
             script.onerror = function() {
                 document.getElementById("gpsStatus").innerText = "Impossibile caricare la cartografia.";
             };
@@ -835,7 +859,6 @@
             document.head.appendChild(script);
         }
         
-        // Gestione globale dell'errore di autenticazione Google Maps (es. chiave errata o revocata)
         window.gm_authFailure = function() {
             showErrorModal("L'API Key di Google Maps inserita non è valida o ha restrizioni errate. Reinseriscila.");
             localStorage.removeItem('gmaps_api_key');
@@ -849,18 +872,14 @@
         // --- INIZIALIZZAZIONE MAPPA E GPS ---
         function initMap() {
             document.getElementById("gpsStatus").innerText = "Ricerca GPS in corso...";
-            // Coordinate di default: Noci, Puglia (40.793, 17.126)
             const defaultLoc = { lat: 40.793, lng: 17.126 };
 
-            // Generazione del crocicchio (crosshair) personalizzato in formato SVG vettoriale
             const crosshairSvg = `
                 <svg width="32" height="32" viewBox="0 0 32 32" xmlns="http://www.w3.org/2000/svg">
-                    <!-- Bordo Nero per massimo contrasto su ortofoto chiare/scure -->
                     <line x1="16" y1="0" x2="16" y2="12" stroke="#000000" stroke-width="3"/>
                     <line x1="16" y1="20" x2="16" y2="32" stroke="#000000" stroke-width="3"/>
                     <line x1="0" y1="16" x2="12" y2="16" stroke="#000000" stroke-width="3"/>
                     <line x1="20" y1="16" x2="32" y2="16" stroke="#000000" stroke-width="3"/>
-                    <!-- Crocicchio Giallo -->
                     <line x1="16" y1="0" x2="16" y2="12" stroke="#FACC15" stroke-width="1.5"/>
                     <line x1="16" y1="20" x2="16" y2="32" stroke="#FACC15" stroke-width="1.5"/>
                     <line x1="0" y1="16" x2="12" y2="16" stroke="#FACC15" stroke-width="1.5"/>
@@ -868,29 +887,24 @@
                 </svg>
             `;
             
-            // Imposta l'hotspot di interazione del mouse esattamente al centro del mirino (pixel 16, 16)
             const cursorUrl = 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(crosshairSvg.trim());
             const customCursor = `url('${cursorUrl}') 16 16, crosshair`;
 
             map = new google.maps.Map(document.getElementById("map"), {
                 zoom: 18,
                 center: defaultLoc,
-                mapTypeId: "satellite", // Ortofoto aggiornata
-                disableDefaultUI: true, // UI pulita per mobile
+                mapTypeId: "satellite",
+                disableDefaultUI: true,
                 zoomControl: true,
-                draggableCursor: customCursor, // Sostituisce la "manina" aperta al passaggio
-                draggingCursor: customCursor   // Sostituisce la "manina" chiusa al trascinamento
+                draggableCursor: customCursor,
+                draggingCursor: customCursor
             });
 
-            // Listener per il tocco sulla mappa
             map.addListener("click", (e) => {
                 placeMarkerAndGetUTM(e.latLng);
             });
 
-            // Avvia la geolocalizzazione GPS in real-time
             startGPS();
-            
-            // Renderizza i marker delle piante salvate 
             renderSavedTreeMarkers();
         }
 
@@ -907,7 +921,6 @@
                         statusText.innerText = "GPS Attivo - Precisione: " + Math.round(position.coords.accuracy) + "m";
                         statusText.classList.replace("text-gray-300", "text-green-400");
 
-                        // Centra la mappa solo la prima volta o se richiesto (qui aggiorniamo solo il marker)
                         if (!userMarker) {
                             userMarker = new google.maps.Marker({
                                 position: pos,
@@ -921,7 +934,7 @@
                                     strokeWeight: 2,
                                 },
                                 title: "Tua Posizione",
-                                clickable: false // Rende il cursore GPS "trasparente" al tocco
+                                clickable: false
                             });
                             map.setCenter(pos);
                         } else {
@@ -929,7 +942,6 @@
                         }
                     },
                     (error) => {
-                        // Evitiamo di stampare l'errore rosso in console se sappiamo che è la policy dell'iframe
                         if (error.message && error.message.includes("permissions policy")) {
                             console.log("Info GPS: Uso posizione simulata a causa delle restrizioni dell'anteprima.");
                         } else {
@@ -938,7 +950,6 @@
                         
                         let msg = "Errore GPS.";
                         if (error.code === 1) {
-                            // Se siamo nell'ambiente di anteprima isolato (iframe)
                             if (error.message && error.message.includes("permissions policy")) {
                                 msg = "Anteprima: GPS bloccato, uso posizione simulata (Noci).";
                                 const mockPos = { lat: 40.793, lng: 17.126 };
@@ -949,7 +960,7 @@
                                         icon: {
                                             path: google.maps.SymbolPath.CIRCLE,
                                             scale: 8,
-                                            fillColor: "#f59e0b", // Arancione per simulazione
+                                            fillColor: "#f59e0b",
                                             fillOpacity: 1,
                                             strokeColor: "white",
                                             strokeWeight: 2,
@@ -962,7 +973,6 @@
                                 }
                             } else {
                                 msg = "GPS negato (permessi o ambiente non sicuro).";
-                                // Se l'errore è dovuto alla policy del browser, mostriamo la modale di guida
                                 showGpsPermissionModal();
                             }
                         }
@@ -982,12 +992,8 @@
             }
         }
 
-        // --- GESTIONE MODALE GPS ---
         function showGpsPermissionModal() {
-            // Non mostriamo la modale se siamo palesemente nell'iframe di test (dove non si può sbloccare)
-            // altrimenti rischiamo di bloccare l'utente in un loop nell'ambiente di anteprima.
             if (window.self !== window.top) return; 
-            
             document.getElementById("gpsPermissionModal").classList.remove("hidden");
         }
 
@@ -999,21 +1005,18 @@
             closeGpsPermissionModal();
             document.getElementById("gpsStatus").innerText = "Nuovo tentativo GPS in corso...";
             document.getElementById("gpsStatus").classList.replace("text-red-400", "text-gray-300");
-            startGPS(); // Riavvia la procedura di aggancio
+            startGPS(); 
         }
 
-        // --- CONVERSIONE COORDINATE (WGS84 -> UTM) E SALVATAGGIO LAT/LNG REALI ---
         function placeMarkerAndGetUTM(latLng) {
-            // Memorizziamo Lat/Lng crudi per tracciare il puntino giallo con esattezza millimetrica al salvataggio
             currentClickLatLng = { lat: latLng.lat(), lng: latLng.lng() };
 
-            // Posiziona o sposta il pin rosso per la NUOVA pianta
             if (!pinMarker) {
                 pinMarker = new google.maps.Marker({
                     position: latLng,
                     map: map,
                     icon: "http://maps.google.com/mapfiles/ms/icons/red-dot.png",
-                    clickable: false // Rende il pin rosso trasparente a successivi tocchi ravvicinati
+                    clickable: false
                 });
             } else {
                 pinMarker.setPosition(latLng);
@@ -1022,19 +1025,13 @@
             const lat = latLng.lat();
             const lng = latLng.lng();
 
-            // Calcolo zona UTM dinamica in base alla longitudine
-            // (La Puglia è generalmente Zona 33N)
             const zone = Math.floor((lng + 180) / 6) + 1;
             
-            // Definizioni per Proj4js
             const projWGS84 = "+proj=longlat +datum=WGS84 +no_defs";
             const projUTM = `+proj=utm +zone=${zone} +datum=WGS84 +units=m +no_defs`;
 
-            // Esecuzione conversione
             const utmCoords = proj4(projWGS84, projUTM, [lng, lat]);
             
-            // Regola di formattazione: Punto per i decimali, Nessun separatore migliaia, Suffisso " m Est" / " m Nord"
-            // utmCoords[0] è Easting (X), utmCoords[1] è Northing (Y)
             const easting = utmCoords[0].toFixed(2);
             const northing = utmCoords[1].toFixed(2);
 
@@ -1042,12 +1039,10 @@
             document.getElementById("coordN").value = `${northing} m Nord`;
         }
 
-        // --- GESTIONE FOTOGRAFIA (CON COMPRESSIONE AUTOMATICA) ---
         function handlePhoto(event) {
             const file = event.target.files[0];
             if (!file) return;
 
-            // Generazione nome file aaaammgg_hhmmss.jpg
             const now = new Date();
             const pad = (n) => String(n).padStart(2, '0');
             const fileName = `${now.getFullYear()}${pad(now.getMonth()+1)}${pad(now.getDate())}_${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}.jpg`;
@@ -1055,14 +1050,11 @@
             document.getElementById("photoFileName").value = fileName;
             document.getElementById("photoNameDisplay").innerText = "Elaborazione foto in corso...";
 
-            // Lettura file con FileReader
             const reader = new FileReader();
             reader.onload = function(e) {
-                // Compressione con Canvas per rispettare il limite Cloud (1MB max) ed evitare file pesanti
                 const img = new Image();
                 img.onload = function() {
                     const canvas = document.createElement('canvas');
-                    // Aumentata la risoluzione nativa a 1920x1440 (Full HD 4:3) per l'export in alta qualità
                     const MAX_WIDTH = 1920; 
                     const MAX_HEIGHT = 1440;
                     let width = img.width;
@@ -1084,7 +1076,6 @@
                     const ctx = canvas.getContext('2d');
                     ctx.drawImage(img, 0, 0, width, height);
                     
-                    // Comprime a JPEG qualità 85% (Ottimo bilanciamento tra definizione e limite Cloud di 1MB)
                     const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.85); 
 
                     const preview = document.getElementById("photoPreview");
@@ -1100,6 +1091,7 @@
 
         // --- SALVATAGGIO DATI ---
         async function saveTree() {
+            const committente = document.getElementById("committente").value;
             const id = document.getElementById("idPianta").value;
             const tecnico = document.getElementById("tecnico").value;
             const comune = document.getElementById("comune").value;
@@ -1110,10 +1102,10 @@
             const classe = document.getElementById("classeDiametrica").value;
             const monumentalita = document.getElementById("monumentalita").value;
             const ambiente = document.getElementById("ambiente").value;
+            const note = document.getElementById("note").value;
             const photoName = document.getElementById("photoFileName").value;
             const photoData = document.getElementById("photoDataUrl").value;
 
-            // Validazione base
             if (!coordN || !coordE) {
                 showErrorModal("Tocca la mappa per acquisire le coordinate UTM.");
                 return;
@@ -1123,9 +1115,9 @@
                 return;
             }
 
-            // Creazione Record (Aggiunti i parametri 'lat' e 'lng' puri per la tracciatura esatta)
             const treeRecord = {
                 id: id,
+                committente: committente,
                 tecnico: tecnico,
                 comune: comune,
                 foglio: foglio,
@@ -1137,30 +1129,29 @@
                 classe_diametrica: classe,
                 monumentalita: monumentalita,
                 ambiente: ambiente,
+                note: note,
                 foto_nome: photoName,
-                foto_dati: photoData // Salvato in memoria per il PDF
+                foto_dati: photoData
             };
 
             treesDatabase.push(treeRecord);
             
-            // Aggiornamento UI
             updateNextId();
             document.getElementById("recordCount").innerText = treesDatabase.length;
-            renderTreeList(); // Questo ora ridisegnerà anche i pallini sulla mappa
+            renderTreeList(); 
             
-            // Reset Campi Mappa e Foto
             document.getElementById("coordN").value = "";
             document.getElementById("coordE").value = "";
+            document.getElementById("note").value = "";
             document.getElementById("photoInput").value = "";
             document.getElementById("photoFileName").value = "";
             document.getElementById("photoDataUrl").value = "";
             document.getElementById("photoPreview").style.display = "none";
             document.getElementById("photoNameDisplay").innerText = "";
-            if (pinMarker) pinMarker.setMap(null); // Rimuove il pin rosso di inserimento
+            if (pinMarker) pinMarker.setMap(null);
             pinMarker = null;
-            currentClickLatLng = null; // Resetta le coordinate del tocco
+            currentClickLatLng = null;
 
-            // Notifica Salvataggio Locale Permanente su IndexedDB
             showToast("Salvataggio permanente in memoria in corso...");
             const saveSuccess = await saveToLocalDB(treeRecord);
             if (saveSuccess) {
@@ -1172,16 +1163,15 @@
             window.scrollTo(0, 0);
         }
 
-        // --- GESTIONE RECORD, VISUALIZZAZIONE MAPPA E CANCELLAZIONI ---
+        // --- GESTIONE RECORD E MAPPA ---
         function updateNextId() {
             const usedIds = treesDatabase.map(t => parseInt(t.id, 10)).sort((a,b) => a - b);
             let nextId = 1;
-            // Algoritmo "Fill the gap": Cerca il primo ID mancante partendo da 1
             for (let i = 0; i < usedIds.length; i++) {
                 if (usedIds[i] === nextId) {
                     nextId++;
                 } else {
-                    break; // Trovato un ID saltato/cancellato
+                    break;
                 }
             }
             document.getElementById("idPianta").value = String(nextId).padStart(3, '0');
@@ -1192,7 +1182,6 @@
             if (treesDatabase.length === 0) {
                 listContainer.innerHTML = '<p class="text-gray-500 italic">Nessun rilievo salvato.</p>';
             } else {
-                // Ordina i record per ID decrescente (l'ultimo rilievo in alto) esclusivamente per la visualizzazione nell'App
                 const sortedTreesDesc = [...treesDatabase].sort((a,b) => parseInt(b.id, 10) - parseInt(a.id, 10));
                 
                 let html = '';
@@ -1216,11 +1205,9 @@
                 listContainer.innerHTML = html;
             }
 
-            // Contestualmente all'aggiornamento della lista, aggiorniamo i "pallini" in mappa
             renderSavedTreeMarkers();
         }
 
-        // --- FUNZIONE CENTRATURA MAPPA SU SINGOLA PIANTA ---
         function centerMapOnTree(id) {
             if (!map) return;
             
@@ -1229,11 +1216,9 @@
 
             let targetPos = null;
 
-            // Se abbiamo le coordinate WGS84 pure (piante rilevate nativamente)
             if (tree.lat && tree.lng) {
                 targetPos = { lat: tree.lat, lng: tree.lng };
             } 
-            // Fallback: conversione inversa da UTM (per rilievi storici privi di Lat/Lng palese)
             else if (tree.coord_e && tree.coord_n) {
                 const e = parseFloat(tree.coord_e);
                 const n = parseFloat(tree.coord_n);
@@ -1250,11 +1235,8 @@
             }
 
             if (targetPos) {
-                // Centra e fa uno zoom molto spinto (livello 21) per isolare visivamente la pianta selezionata
                 map.setCenter(targetPos);
                 map.setZoom(21);
-                
-                // Scrolling fluido verso l'inizio della pagina (la mappa)
                 window.scrollTo({ top: 0, behavior: 'smooth' });
                 showToast(`Mappa centrata sulla Pianta ${tree.id}`);
             } else {
@@ -1262,33 +1244,60 @@
             }
         }
 
-        // Funzione per disegnare i Marker delle piante già censite
-        function renderSavedTreeMarkers() {
-            if (!map) return; // Mappa non ancora pronta
+        // --- FUNZIONE ZOOM GLOBALE SU TUTTI I RILIEVI ---
+        function zoomToAllMarkers() {
+            if (!map) return;
+            
+            if (savedMarkers.length === 0) {
+                showToast("Nessun rilievo presente per calcolare lo zoom globale.");
+                return;
+            }
 
-            // 1. Pulisce tutti i marker attualmente disegnati
+            const bounds = new google.maps.LatLngBounds();
+            
+            // Estende i confini della mappa per includere ogni singolo marker salvato
+            savedMarkers.forEach(marker => {
+                bounds.extend(marker.getPosition());
+            });
+
+            map.fitBounds(bounds);
+
+            // Fact-Checking: Se c'è una sola pianta, fitBounds applica uno zoom esagerato.
+            // Lo intercettiamo e lo limitiamo a un livello più leggibile topograficamente.
+            if (savedMarkers.length === 1) {
+                google.maps.event.addListenerOnce(map, 'bounds_changed', function() {
+                    if (this.getZoom() > 19) {
+                        this.setZoom(19);
+                    }
+                });
+            } else {
+                showToast("Inquadratura adattata a tutti i campionamenti.");
+            }
+            
+            // Scorre la vista verso l'alto per mostrare la mappa completa all'utente
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        }
+
+        function renderSavedTreeMarkers() {
+            if (!map) return;
+
             savedMarkers.forEach(marker => marker.setMap(null));
             savedMarkers = [];
 
-            // 2. Itera su tutto il DB e disegna un nuovo marker per ogni pianta
             treesDatabase.forEach((tree, index) => {
                 let positionForMarker = null;
 
-                // Se abbiamo la Lat/Lng pura salvata in memoria (nuove piante)
                 if (tree.lat && tree.lng) {
                     positionForMarker = { lat: tree.lat, lng: tree.lng };
                 } 
-                // Fallback: Se la pianta è stata importata e ha solo coordinate UTM, tenta Reverse Projection
                 else if (tree.coord_e && tree.coord_n) {
                     const e = parseFloat(tree.coord_e);
                     const n = parseFloat(tree.coord_n);
                     if (!isNaN(e) && !isNaN(n)) {
-                        // Assumiamo Zona 33 per la Regione Puglia (Fact-Checking: Copre gran parte del territorio regionale)
                         const projWGS84 = "+proj=longlat +datum=WGS84 +no_defs";
                         const projUTM = `+proj=utm +zone=33 +datum=WGS84 +units=m +no_defs`;
                         try {
                             const wgsCoords = proj4(projUTM, projWGS84, [e, n]);
-                            // Proj4js restituisce [Longitudine, Latitudine]
                             positionForMarker = { lat: wgsCoords[1], lng: wgsCoords[0] };
                         } catch (err) {
                             console.error("Errore fallback conversione UTM inversa", err);
@@ -1296,52 +1305,39 @@
                     }
                 }
 
-                // Se abbiamo ottenuto una posizione valida, posizioniamo il marker
                 if (positionForMarker) {
                     const marker = new google.maps.Marker({
                         position: positionForMarker,
                         map: map,
-                        icon: createTreeMarkerIcon(tree.id, tree.monumentalita), // Passaggio della monumentalità per colore cromatico
+                        icon: createTreeMarkerIcon(tree.id, tree.monumentalita),
                         title: `Pianta ${tree.id} - Particella ${tree.particella}`,
-                        clickable: false // FONDAMENTALE: Rende l'etichetta vettoriale inerte al tocco, permettendo di cliccare la mappa "attraverso" di essa
+                        clickable: false
                     });
                     savedMarkers.push(marker);
                 }
             });
         }
 
-        // --- GENERATORE DI ICONE VETTORIALI SEMPLIFICATE E COLORATE ---
         function createTreeMarkerIcon(id, monumentalita) {
-            // Forza rigorosamente la numerazione nel formato 000 (es. 001, 015, 120) a prescindere dal tipo di dato originario
             const displayId = String(id).padStart(3, '0');
-
             const fontSize = 11;
-            const radius = 4; // Dimensione del pallino fissa e invariata
+            const radius = 4;
             
-            // Fact-Checking cromatico: Determina il colore in base alla monumentalità (magenta brillante se monumentale, altrimenti giallo originario)
             const isMonumentale = monumentalita === "MONUMENTALE";
-            const mainColor = isMonumentale ? "#FF00FF" : "#FACC15"; // Magenta brillante / Giallo acceso
-            const strokeColor = isMonumentale ? "#4A004A" : "#854D0E"; // Bordo scuro di contrasto coordinato
+            const mainColor = isMonumentale ? "#FF00FF" : "#FACC15"; 
+            const strokeColor = isMonumentale ? "#4A004A" : "#854D0E"; 
 
-            // Tela ultra-compatta (50x30) per mantenere il testo incollato al marker senza sbavature
-            // Il centro matematico del punto di radicazione è fissato alle coordinate cx=10, cy=15
-            // L'etichetta di testo parte da x=16, quindi a soli 2 pixel dal bordo del pallino (10+4=14)
             const svg = `
                 <svg width="50" height="30" viewBox="0 0 50 30" xmlns="http://www.w3.org/2000/svg">
-                    <!-- Pallino Base -->
                     <circle cx="10" cy="15" r="${radius}" fill="${mainColor}" stroke="${strokeColor}" stroke-width="1.5"/>
-                    
-                    <!-- Traccia nera per stacco visivo del testo (anti-collisione visiva sui colori chiari) -->
                     <text x="16" y="19" fill="none" font-family="system-ui, -apple-system, sans-serif" font-size="${fontSize}" font-weight="900" text-anchor="start" stroke="#000000" stroke-width="3" stroke-linejoin="round">${displayId}</text>
-                    
-                    <!-- Testo principale (Giallo o Magenta) -->
                     <text x="16" y="19" fill="${mainColor}" font-family="system-ui, -apple-system, sans-serif" font-size="${fontSize}" font-weight="900" text-anchor="start">${displayId}</text>
                 </svg>
             `;
             
             return {
                 url: 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(svg),
-                anchor: new google.maps.Point(10, 15), // Allinea perfettamente cx=10, cy=15 con le coordinate Lat/Lng reali
+                anchor: new google.maps.Point(10, 15), 
                 scaledSize: new google.maps.Size(50, 30)
             };
         }
@@ -1359,16 +1355,13 @@
 
         document.getElementById("confirmDeleteBtn").addEventListener("click", async () => {
             if (treeToDeleteId) {
-                // Filtra via l'elemento cancellato localmente
                 treesDatabase = treesDatabase.filter(t => t.id !== treeToDeleteId);
                 
-                // Aggiorna Interfaccia
                 document.getElementById("recordCount").innerText = treesDatabase.length;
                 renderTreeList();
                 updateNextId(); 
                 closeDeleteModal();
 
-                // Cancellazione Permanente in IndexedDB
                 if (localDB) {
                     await deleteFromLocalDB(treeToDeleteId);
                     showToast("Rilievo " + treeToDeleteId + " cancellato in modo definitivo.");
@@ -1388,6 +1381,16 @@
             document.getElementById("errorModal").classList.add("hidden");
         }
 
+        // Recupera in sicurezza il nome del committente per i nomi dei file
+        function getSafeCommittente() {
+            let nomeCommittente = document.getElementById("committente").value.trim();
+            if (!nomeCommittente && treesDatabase.length > 0 && treesDatabase[0].committente) {
+                nomeCommittente = treesDatabase[0].committente;
+            }
+            if (!nomeCommittente) nomeCommittente = "Anonimo";
+            return nomeCommittente.replace(/[^a-z0-9]/gi, '_').replace(/_+/g, '_').replace(/^_|_$/g, '').toUpperCase();
+        }
+
         // --- ESPORTAZIONE CSV ---
         function exportCSV() {
             if (treesDatabase.length === 0) {
@@ -1395,12 +1398,12 @@
                 return;
             }
 
-            // Separatore colonna adeguato per Excel/Fogli Google in Italia (Punto e virgola)
-            let csvContent = "ID_Pianta;Tecnico;Comune;Foglio_Mappa;Particella;Coord_Nord_UTM_WGS84;Coord_Est_UTM_WGS84;Classe_Diametrica;Monumentalita;Ambiente;Nome_File_Foto\n";
+            let csvContent = "ID_Pianta;Committente;Tecnico;Comune;Foglio_Mappa;Particella;Coord_Nord_UTM_WGS84;Coord_Est_UTM_WGS84;Classe_Diametrica;Monumentalita;Ambiente;Note;Nome_File_Foto\n";
 
             treesDatabase.forEach(row => {
                 const rowData = [
                     row.id,
+                    row.committente,
                     row.tecnico,
                     row.comune,
                     row.foglio,
@@ -1410,6 +1413,7 @@
                     row.classe_diametrica,
                     row.monumentalita,
                     row.ambiente,
+                    row.note || "",
                     row.foto_nome
                 ];
                 csvContent += rowData.join(";") + "\n";
@@ -1419,7 +1423,8 @@
             const link = document.createElement("a");
             const url = URL.createObjectURL(blob);
             link.setAttribute("href", url);
-            link.setAttribute("download", `Rilievo_Olivi_${new Date().toISOString().slice(0,10)}.csv`);
+            const safeCommittente = getSafeCommittente();
+            link.setAttribute("download", `Rilievo_Olivi_${safeCommittente}_${new Date().toISOString().slice(0,10)}.csv`);
             link.style.visibility = 'hidden';
             document.body.appendChild(link);
             link.click();
@@ -1427,31 +1432,89 @@
             showToast("Download CSV avviato");
         }
 
-        // --- ESPORTAZIONE PDF ---
+        // Assign jsPDF to window globally to satisfy jspdf-autotable requirements internally
+        window.jsPDF = window.jspdf.jsPDF;
+
+        // --- ESPORTAZIONE PDF (MOTORE DI RENDERING DINAMICO) ---
         function exportPDF() {
+            generatePDFReport('ALL');
+        }
+
+        function exportPDFMonumentali() {
+            generatePDFReport('MONUMENTALE');
+        }
+
+        function exportPDFNonMonumentali() {
+            generatePDFReport('NON MONUMENTALE');
+        }
+
+        function generatePDFReport(filterType) {
             if (treesDatabase.length === 0) {
                 showErrorModal("Nessun dato da esportare.");
                 return;
             }
 
-            const { jsPDF } = window.jspdf;
-            const doc = new jsPDF('landscape'); // Formato orizzontale per far entrare le tabelle
+            let filteredTrees = treesDatabase;
+            let fileSuffix = "Globale";
+            let reportSubtitle = "";
+
+            if (filterType === 'MONUMENTALE') {
+                filteredTrees = treesDatabase.filter(t => t.monumentalita === "MONUMENTALE");
+                fileSuffix = "Solo_Monumentali";
+                reportSubtitle = "(Estratto: Piante Monumentali)";
+            } else if (filterType === 'NON MONUMENTALE') {
+                filteredTrees = treesDatabase.filter(t => t.monumentalita === "NON MONUMENTALE");
+                fileSuffix = "Solo_Non_Monumentali";
+                reportSubtitle = "(Estratto: Piante Non Monumentali)";
+            }
+
+            if (filteredTrees.length === 0) {
+                showErrorModal(`Nessun rilievo trovato per la categoria richiesta.`);
+                return;
+            }
+
+            const doc = new window.jsPDF('landscape'); 
+            
+            let nomeCommittente = document.getElementById("committente").value.trim();
+            if (!nomeCommittente && treesDatabase.length > 0 && treesDatabase[0].committente) nomeCommittente = treesDatabase[0].committente;
 
             // Intestazione Documento
             doc.setFontSize(15);
             doc.text("Classificazione olivi ai sensi dell’Art. 2 della Legge Regione Puglia 4 giugno 2007, n. 14", 14, 20);
+            
+            let currentY = 28;
+            let startYTable = 35;
+
+            // Inserimento del sottotitolo al 2° rigo se presente
+            if (reportSubtitle !== "") {
+                doc.setFont("helvetica", "italic");
+                doc.setFontSize(13);
+                doc.text(reportSubtitle, 14, 27);
+                currentY = 34; // Scala la riga successiva
+                startYTable = 41; // Scala l'inizio della tabella
+            }
+
+            doc.setFont("helvetica", "normal");
             doc.setFontSize(11);
             const dateStr = new Date().toLocaleDateString('it-IT');
             
-            // Calcolo numero piante monumentali per l'intestazione
-            const countMonumentali = treesDatabase.filter(t => t.monumentalita === "MONUMENTALE").length;
-            doc.text(`Data Rilievo: ${dateStr} - Totale Piante: ${treesDatabase.length} di cui Monumentali: ${countMonumentali}`, 14, 28);
+            // Fact-Checking: Calcolo e testo dinamico in base al tipo di report richiesto
+            let countText = "";
+            if (filterType === 'NON MONUMENTALE') {
+                const countNonMonumentali = treesDatabase.filter(t => t.monumentalita === "NON MONUMENTALE").length;
+                countText = `di cui Non Monumentali: ${countNonMonumentali}`;
+            } else {
+                const countMonumentali = treesDatabase.filter(t => t.monumentalita === "MONUMENTALE").length;
+                countText = `di cui Monumentali: ${countMonumentali}`;
+            }
             
-            // Tabella Riepilogativa tramite autoTable
+            doc.text(`Data Rilievo: ${dateStr} - Totale Piante Intero Uliveto: ${treesDatabase.length} ${countText}`, 14, currentY);
+            
+            // Tabella Riepilogativa
             const tableColumn = ["ID", "Comune", "Fg.", "Part.", "Nord (UTM)", "Est (UTM)", "Classe Diametrica", "Monumentalità", "Ambiente"];
             const tableRows = [];
 
-            treesDatabase.forEach(tree => {
+            filteredTrees.forEach(tree => {
                 const treeData = [
                     tree.id,
                     tree.comune,
@@ -1469,41 +1532,32 @@
             doc.autoTable({
                 head: [tableColumn],
                 body: tableRows,
-                startY: 35,
+                startY: startYTable,
                 styles: { fontSize: 8, cellPadding: 2 },
-                headStyles: { fillColor: [22, 163, 74] }, // Verde Agronomo
-                // Hook per intercettare la riga e colorare l'intero record se l'olivo è Monumentale
+                headStyles: { fillColor: [22, 163, 74] }, 
                 didParseCell: function(data) {
                     if (data.section === 'body') {
-                        // L'indice 7 corrisponde alla colonna "Monumentalità"
                         const status = data.row.raw[7]; 
                         if (status === "MONUMENTALE") {
-                            data.cell.styles.textColor = [220, 38, 38]; // Rosso acceso
-                            data.cell.styles.fontStyle = 'bold'; // Grassetto per garantire massima leggibilità tecnica
+                            data.cell.styles.textColor = [220, 38, 38]; 
+                            data.cell.styles.fontStyle = 'bold'; 
                         }
                     }
                 }
             });
 
-            // Opzionale: Aggiunta schede fotografiche se presenti
-            // Generiamo schede con 2 foto per pagina (affiancate e centrate)
-            const treesWithPhotos = treesDatabase.filter(t => t.foto_dati);
+            // Schede fotografiche
+            const treesWithPhotos = filteredTrees.filter(t => t.foto_dati);
             
             for (let i = 0; i < treesWithPhotos.length; i++) {
-                // Aggiungi una nuova pagina ogni 2 foto
                 if (i % 2 === 0) {
                     doc.addPage();
                 }
                 
                 const tree = treesWithPhotos[i];
-                const isLeft = (i % 2 === 0); // true per la foto a sinistra, false per quella a destra
-                
-                // Calcolo asse X centrale per la mezza pagina (Larghezza A4 orizzontale = 297mm)
-                // Metà sinistra: 148.5mm -> Centro = 74.25mm
-                // Metà destra: da 148.5 a 297 -> Centro = 222.75mm
+                const isLeft = (i % 2 === 0); 
                 const centerX = isLeft ? 74.25 : 222.75;
                 
-                // Testi Intestazione Foto (Centrati verticalmente e orizzontalmente)
                 doc.setFontSize(14);
                 doc.text(`Scheda Pianta ID: ${tree.id}`, centerX, 20, { align: 'center' });
                 
@@ -1514,28 +1568,23 @@
                 const monumValue = tree.monumentalita ? tree.monumentalita.toUpperCase() : "ND";
                 
                 if (monumValue === "MONUMENTALE") {
-                    // Calcolo larghezze per centrare il blocco di testo misto (Normal + Bold/Red)
                     doc.setFont("helvetica", "normal");
                     const wLabel = doc.getTextWidth(monumLabel);
                     doc.setFont("helvetica", "bold");
                     const wValue = doc.getTextWidth(monumValue);
                     const startX = centerX - ((wLabel + wValue) / 2);
                     
-                    // Stampa etichetta standard (Nero, Normale)
                     doc.setFont("helvetica", "normal");
                     doc.setTextColor(0, 0, 0);
                     doc.text(monumLabel, startX, 32);
                     
-                    // Stampa valore evidenziato (Rosso, Grassetto)
                     doc.setFont("helvetica", "bold");
-                    doc.setTextColor(220, 38, 38); // Rosso acceso
+                    doc.setTextColor(220, 38, 38); 
                     doc.text(monumValue, startX + wLabel, 32);
                     
-                    // Ripristino parametri per i testi successivi
                     doc.setFont("helvetica", "normal");
                     doc.setTextColor(0, 0, 0);
                 } else {
-                    // Stampa standard per NON MONUMENTALE
                     doc.setFont("helvetica", "normal");
                     doc.setTextColor(0, 0, 0);
                     doc.text(`${monumLabel}${monumValue}`, centerX, 32, { align: 'center' });
@@ -1546,33 +1595,26 @@
                 doc.text(`File: ${tree.foto_nome}`, centerX, 50, { align: 'center' });
                 
                 try {
-                    // Previene lo stretching calcolando le proporzioni reali dell'immagine
                     const imgProps = doc.getImageProperties(tree.foto_dati);
-                    const pdfMaxWidth = 135; // Spazio orizzontale max per mezza pagina (con margini)
-                    const pdfMaxHeight = 140; // Ricalibrato (ridotto da 150) per ospitare i nuovi righi di testo
+                    const pdfMaxWidth = 135; 
+                    const pdfMaxHeight = 140; 
                     
-                    // Calcola il rapporto di scala necessario per far rientrare l'immagine nel riquadro massimo
                     const ratio = Math.min(pdfMaxWidth / imgProps.width, pdfMaxHeight / imgProps.height);
                     
-                    // Applica il rapporto alle dimensioni reali
                     const finalWidth = imgProps.width * ratio;
                     const finalHeight = imgProps.height * ratio;
                     
-                    // Calcolo posizionamento Y e X per centrare l'immagine nel riquadro
                     const imgX = centerX - (finalWidth / 2);
-                    const boxCenterY = 55 + (pdfMaxHeight / 2); // Centro dell'area dedicata alla foto (spostato verso il basso)
+                    const boxCenterY = 55 + (pdfMaxHeight / 2); 
                     const imgY = boxCenterY - (finalHeight / 2);
                     
-                    // 1. Disegna l'ombreggiatura (rettangolo grigio chiaro spostato in basso a destra)
-                    doc.setFillColor(210, 210, 210); // Grigio ombra
+                    doc.setFillColor(210, 210, 210); 
                     doc.rect(imgX + 1.5, imgY + 1.5, finalWidth, finalHeight, 'F');
                     
-                    // 2. Inserisce la Fotografia
                     doc.addImage(tree.foto_dati, 'JPEG', imgX, imgY, finalWidth, finalHeight);
                     
-                    // 3. Disegna la cornice elegante (sottile bordo scuro)
-                    doc.setDrawColor(80, 80, 80); // Grigio scuro/antracite
-                    doc.setLineWidth(0.3); // Spessore fine
+                    doc.setDrawColor(80, 80, 80); 
+                    doc.setLineWidth(0.3); 
                     doc.rect(imgX, imgY, finalWidth, finalHeight, 'S');
                     
                 } catch(e) {
@@ -1581,37 +1623,36 @@
                 }
             }
 
-            // --- Aggiunta Numerazione Pagine a Piè di Pagina ---
+            // Aggiunta Numerazione e Riferimenti
             const totalPages = doc.internal.getNumberOfPages();
-            
-            // Recuperiamo il nome del Tecnico dal primo record utile (o dal form se vuoto)
-            const nomeTecnico = treesDatabase.length > 0 && treesDatabase[0].tecnico ? treesDatabase[0].tecnico : document.getElementById("tecnico").value;
-
-            // Recuperiamo la versione corrente dell'App
+            let nomeTecnico = document.getElementById("tecnico").value.trim();
+            if (!nomeTecnico && treesDatabase.length > 0 && treesDatabase[0].tecnico) nomeTecnico = treesDatabase[0].tecnico;
             const buildVersion = document.getElementById("appVersion").innerText;
-            const appInfoTesto = `Rilievo Olivi - ${buildVersion}`;
+            const appInfoTesto = `Rilievo Olivi - ${buildVersion}`; // Fact-Checking: inserito per ripristinare il blocco PDF
 
             for (let i = 1; i <= totalPages; i++) {
                 doc.setPage(i);
                 
-                // Numerazione pagina (centrata)
+                if (nomeCommittente) {
+                    doc.setFont("helvetica", "italic");
+                    doc.setFontSize(9);
+                    doc.setTextColor(80, 80, 80);
+                    doc.text(`Committente: ${nomeCommittente}`, 148.5, 12, { align: 'center' });
+                }
+                
                 doc.setFont("helvetica", "normal");
                 doc.setFontSize(10);
-                doc.setTextColor(80, 80, 80); // Grigio scuro per il footer
+                doc.setTextColor(80, 80, 80); 
                 doc.text(`Pag. ${i} di ${totalPages}`, 148.5, 202, { align: 'center' });
                 
-                // Nome App e Build (A sinistra, font corsivo, size 9)
                 doc.setFont("helvetica", "italic");
                 doc.setFontSize(9);
                 doc.text(appInfoTesto, 14, 202, { align: 'left' });
-                
-                // Riferimenti Tecnico (A destra, font corsivo, size 9)
-                doc.setFont("helvetica", "italic");
-                doc.setFontSize(9);
                 doc.text(`${nomeTecnico}`, 283, 202, { align: 'right' });
             }
 
-            doc.save(`Report_Olivi_${new Date().toISOString().slice(0,10)}.pdf`);
+            const safeCommittente = getSafeCommittente();
+            doc.save(`Report_Olivi_${safeCommittente}_${fileSuffix}_${new Date().toISOString().slice(0,10)}.pdf`);
             showToast("Download PDF avviato");
         }
 
@@ -1627,13 +1668,10 @@
             showToast("Creazione archivio foto in corso...");
             
             const zip = new JSZip();
-            // Creiamo la cartella che conterrà i file jpg
             const folder = zip.folder("FOTO_OLIVI");
 
             treesWithPhotos.forEach(tree => {
-                // foto_dati contiene il prefisso "data:image/jpeg;base64," che va rimosso per JSZip
                 const base64Data = tree.foto_dati.split(',')[1];
-                // Aggiunge fisicamente il file .jpg nella cartella FOTO_OLIVI
                 folder.file(tree.foto_nome, base64Data, {base64: true});
             });
 
@@ -1641,7 +1679,8 @@
                 const content = await zip.generateAsync({ type: "blob" });
                 const link = document.createElement("a");
                 link.href = URL.createObjectURL(content);
-                link.download = `Foto_Olivi_${new Date().toISOString().slice(0,10)}.zip`;
+                const safeCommittente = getSafeCommittente();
+                link.download = `Foto_Olivi_${safeCommittente}_${new Date().toISOString().slice(0,10)}.zip`;
                 link.style.visibility = 'hidden';
                 document.body.appendChild(link);
                 link.click();
@@ -1653,7 +1692,7 @@
             }
         }
 
-        // --- ESPORTAZIONE MAPPA (PDF) ---
+        // --- ESPORTAZIONE MAPPA (PDF) - MOTORE STATIC MAPS AGGIORNATO ---
         async function exportMapPDF() {
             if (treesDatabase.length === 0) {
                 showErrorModal("Nessun rilievo presente sulla mappa da esportare.");
@@ -1662,74 +1701,143 @@
 
             showToast("Acquisizione cartografia in corso. Attendi...");
 
+            const apiKey = localStorage.getItem('gmaps_api_key');
+            
+            // Metodo primario: Google Static Maps API (Bypassa i blocchi CORS del browser)
+            if (apiKey) {
+                try {
+                    const center = map.getCenter();
+                    const zoom = map.getZoom();
+                    
+                    // Richiesta Ortofoto Google ad alta risoluzione
+                    let staticMapUrl = `https://maps.googleapis.com/maps/api/staticmap?center=${center.lat()},${center.lng()}&zoom=${zoom}&size=640x400&scale=2&maptype=satellite&key=${apiKey}`;
+
+                    // Aggiunta Markers vettoriali (limite prudenziale per non sforare la lunghezza URL)
+                    treesDatabase.slice(0, 75).forEach(tree => {
+                        if (tree.lat && tree.lng) {
+                            const color = tree.monumentalita === "MONUMENTALE" ? "purple" : "yellow";
+                            staticMapUrl += `&markers=color:${color}%7C${tree.lat},${tree.lng}`;
+                        }
+                    });
+
+                    // Caricamento Immagine via CORS nativo bypassando html2canvas
+                    const img = new Image();
+                    img.crossOrigin = "Anonymous";
+                    
+                    img.onload = function() {
+                        const canvas = document.createElement('canvas');
+                        canvas.width = img.width;
+                        canvas.height = img.height;
+                        const ctx = canvas.getContext('2d');
+                        ctx.drawImage(img, 0, 0);
+                        
+                        const imgData = canvas.toDataURL('image/jpeg', 0.9);
+                        buildAndSaveMapPDF(imgData);
+                    };
+                    
+                    img.onerror = async function() {
+                        console.log("Limite API Static Maps raggiunto, tento fallback html2canvas offline...");
+                        await exportMapPDFFallback();
+                    };
+                    
+                    img.src = staticMapUrl;
+                    return; // Attende l'evento onload dell'immagine
+                } catch(e) {
+                    console.error("Errore di rendering primario", e);
+                    await exportMapPDFFallback();
+                }
+            } else {
+                await exportMapPDFFallback();
+            }
+        }
+
+        async function exportMapPDFFallback() {
             const mapElement = document.getElementById("map");
             
+            // Fact-Checking: Disattivazione temporanea dei controlli UI di Google Maps per una stampa pulita
+            if (map) map.setOptions({ zoomControl: false, fullscreenControl: false });
+            
+            // Breve attesa per permettere al DOM di aggiornarsi e far sparire i bottoni prima dello scatto
+            await new Promise(resolve => setTimeout(resolve, 400));
+
             try {
-                // html2canvas scatta una "fotografia" del div della mappa esattamente come la visualizzi
                 const canvas = await html2canvas(mapElement, { 
-                    useCORS: true, // Fondamentale per catturare le tiles satellitari di Google
+                    useCORS: true, 
                     allowTaint: false,
-                    scale: 2 // Aumenta la risoluzione per una stampa nitida
+                    scale: 2 
                 });
-
                 const imgData = canvas.toDataURL('image/jpeg', 0.9);
-                
-                const { jsPDF } = window.jspdf;
-                const doc = new jsPDF('landscape'); // Formato orizzontale A4
-                
-                // Intestazione
-                doc.setFontSize(15);
-                doc.text("Planimetria Rilievi - Classificazione olivi (L.R. Puglia 14/2007)", 14, 20);
-                doc.setFontSize(11);
-                const dateStr = new Date().toLocaleDateString('it-IT');
-                
-                // Calcolo numero piante monumentali per l'intestazione
-                const countMonumentali = treesDatabase.filter(t => t.monumentalita === "MONUMENTALE").length;
-                doc.text(`Data: ${dateStr} - Totale Piante: ${treesDatabase.length} di cui Monumentali: ${countMonumentali}`, 14, 28);
+                buildAndSaveMapPDF(imgData);
+            } catch (error) {
+                console.error("Errore generazione mappa PDF html2canvas:", error);
+                showErrorModal("Impossibile catturare la mappa per limitazioni di sicurezza del browser. Prova con uno screenshot manuale o verifica l'API Key.");
+            } finally {
+                // Ripristino immediato dei controlli UI sulla mappa live al termine dell'esportazione
+                if (map) map.setOptions({ zoomControl: true, fullscreenControl: false });
+            }
+        }
 
-                // Inserimento Immagine Mappa
-                // Dimensioni foglio A4 landscape: 297 x 210 mm
-                // Margini: 14mm sx, 14mm dx -> Larghezza disp: 269mm
-                const pdfMaxWidth = 269;
-                const pdfMaxHeight = 155; // Spazio verticale dedicato
-                
-                const ratio = Math.min(pdfMaxWidth / canvas.width, pdfMaxHeight / canvas.height);
-                const finalWidth = canvas.width * ratio;
-                const finalHeight = canvas.height * ratio;
-                
-                // Centratura orizzontale
-                const imgX = (297 - finalWidth) / 2;
-                
-                // Cornice e Ombra per eleganza tecnica
-                doc.setFillColor(210, 210, 210);
-                doc.rect(imgX + 1.5, 35 + 1.5, finalWidth, finalHeight, 'F');
-                doc.addImage(imgData, 'JPEG', imgX, 35, finalWidth, finalHeight);
-                doc.setDrawColor(80, 80, 80);
-                doc.setLineWidth(0.3);
-                doc.rect(imgX, 35, finalWidth, finalHeight, 'S');
+        // Funzione isolata e sicura per comporre e scaricare la Mappa in PDF
+        function buildAndSaveMapPDF(imgData) {
+            const doc = new window.jsPDF('landscape'); 
+            
+            let nomeCommittente = document.getElementById("committente").value.trim();
+            if (!nomeCommittente && treesDatabase.length > 0 && treesDatabase[0].committente) nomeCommittente = treesDatabase[0].committente;
 
-                // --- Piè di Pagina ---
-                const nomeTecnico = treesDatabase.length > 0 && treesDatabase[0].tecnico ? treesDatabase[0].tecnico : document.getElementById("tecnico").value;
-                const buildVersion = document.getElementById("appVersion").innerText;
-                const appInfoTesto = `Planimetria - ${buildVersion}`;
-
-                doc.setFont("helvetica", "normal");
-                doc.setFontSize(10);
-                doc.setTextColor(80, 80, 80);
-                doc.text(`Pag. 1 di 1`, 148.5, 202, { align: 'center' });
-                
+            if (nomeCommittente) {
                 doc.setFont("helvetica", "italic");
                 doc.setFontSize(9);
-                doc.text(appInfoTesto, 14, 202, { align: 'left' });
-                doc.text(`${nomeTecnico}`, 283, 202, { align: 'right' });
-
-                doc.save(`Planimetria_Olivi_${new Date().toISOString().slice(0,10)}.pdf`);
-                showToast("Download Planimetria completato!");
-
-            } catch (error) {
-                console.error("Errore generazione mappa PDF:", error);
-                showErrorModal("Impossibile catturare la mappa per limitazioni di sicurezza del browser. Prova con uno screenshot manuale.");
+                doc.setTextColor(80, 80, 80);
+                doc.text(`Committente: ${nomeCommittente}`, 148.5, 12, { align: 'center' });
             }
+
+            doc.setTextColor(0, 0, 0);
+            doc.setFont("helvetica", "normal");
+            doc.setFontSize(15);
+            doc.text("Planimetria Rilievi - Classificazione olivi (L.R. Puglia 14/2007)", 14, 20);
+            doc.setFontSize(11);
+            const dateStr = new Date().toLocaleDateString('it-IT');
+            
+            const countMonumentali = treesDatabase.filter(t => t.monumentalita === "MONUMENTALE").length;
+            doc.text(`Data: ${dateStr} - Totale Piante: ${treesDatabase.length} di cui Monumentali: ${countMonumentali}`, 14, 28);
+
+            const pdfMaxWidth = 269;
+            const pdfMaxHeight = 155; 
+            
+            const imgProps = doc.getImageProperties(imgData);
+            const ratio = Math.min(pdfMaxWidth / imgProps.width, pdfMaxHeight / imgProps.height);
+            const finalWidth = imgProps.width * ratio;
+            const finalHeight = imgProps.height * ratio;
+            
+            const imgX = (297 - finalWidth) / 2;
+            const imgY = 35; 
+            
+            doc.setFillColor(210, 210, 210);
+            doc.rect(imgX + 1.5, imgY + 1.5, finalWidth, finalHeight, 'F');
+            doc.addImage(imgData, 'JPEG', imgX, imgY, finalWidth, finalHeight);
+            doc.setDrawColor(80, 80, 80);
+            doc.setLineWidth(0.3);
+            doc.rect(imgX, imgY, finalWidth, finalHeight, 'S');
+
+            let nomeTecnico = document.getElementById("tecnico").value.trim();
+            if (!nomeTecnico && treesDatabase.length > 0 && treesDatabase[0].tecnico) nomeTecnico = treesDatabase[0].tecnico;
+            
+            const buildVersion = document.getElementById("appVersion").innerText;
+            const appInfoTesto = `Planimetria - ${buildVersion}`; // Fact-Checking: Variabile ripristinata per evitare crash della mappa
+
+            doc.setFont("helvetica", "normal");
+            doc.setFontSize(10);
+            doc.setTextColor(80, 80, 80);
+            doc.text(`Pag. 1 di 1`, 148.5, 202, { align: 'center' });
+            
+            doc.setFont("helvetica", "italic");
+            doc.setFontSize(9);
+            doc.text(appInfoTesto, 14, 202, { align: 'left' });
+            doc.text(`${nomeTecnico}`, 283, 202, { align: 'right' });
+
+            const safeCommittente = getSafeCommittente();
+            doc.save(`Planimetria_Olivi_${safeCommittente}_${new Date().toISOString().slice(0,10)}.pdf`);
+            showToast("Download Planimetria completato!");
         }
 
         // --- UTILITY ---
@@ -1742,9 +1850,6 @@
 
         // --- GESTIONE VERSIONE AUTOMATICA (HASH DEL CODICE) ---
         function setAppVersion() {
-            // Estraiamo il contenuto testuale del Form, dello Stile e dello Script logico.
-            // Calcolando un "Hash" (Checksum) di questi testi, la versione cambierà matematicamente 
-            // SOLO ED ESCLUSIVAMENTE se viene aggiunto, tolto o modificato anche un solo carattere nel codice sorgente.
             const formHTML = document.getElementById("treeForm") ? document.getElementById("treeForm").innerHTML : "";
             const cssApp = document.getElementsByTagName("style")[0] ? document.getElementsByTagName("style")[0].innerHTML : "";
             const scriptLogica = document.getElementById("coreLogic") ? document.getElementById("coreLogic").innerHTML : "";
@@ -1756,25 +1861,27 @@
             for (let i = 0; i < codiceSorgente.length; i++) {
                 const char = codiceSorgente.charCodeAt(i);
                 hash = ((hash << 5) - hash) + char;
-                hash = hash & hash; // Converte in intero a 32 bit
+                hash = hash & hash; 
             }
             
-            // Genera una stringa esadecimale univoca per la build corrente (es. 7A3F9B)
             const hashVersion = Math.abs(hash).toString(16).toUpperCase().substring(0, 6);
             document.getElementById("appVersion").innerText = "v.Build-" + hashVersion;
         }
 
         // Setup iniziale all'apertura
         window.onload = async function() {
-            setAppVersion(); // Imposta la versione dinamicamente in base al codice
+            setAppVersion(); 
             
-            // Inizializza il DB Locale Permanente PRIMA di mostrare i dati
             try {
                 await initLocalDB();
                 const savedRecords = await loadFromLocalDB();
                 if (savedRecords && savedRecords.length > 0) {
-                    treesDatabase = savedRecords; // Carica la memoria protetta nella RAM
+                    treesDatabase = savedRecords; 
                     showToast("Dati recuperati dalla memoria del dispositivo.");
+                    
+                    // Ripristina campi testuali per comodità operativa
+                    if (treesDatabase[0].committente) document.getElementById("committente").value = treesDatabase[0].committente;
+                    if (treesDatabase[0].tecnico) document.getElementById("tecnico").value = treesDatabase[0].tecnico;
                 }
             } catch (e) {
                 console.error("Errore avvio DB Locale:", e);
@@ -1785,7 +1892,7 @@
             document.getElementById("recordCount").innerText = treesDatabase.length;
             renderTreeList();
             
-            loadGoogleMapsScript(); // Avvia caricamento Mappa dinamicamente
+            loadGoogleMapsScript(); 
         };
 
     </script>

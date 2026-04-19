@@ -384,15 +384,25 @@
 
         <hr class="border-2 border-gray-300 my-8">
 
-        <!-- GESTIONE SESSIONI -->
-        <h2 class="text-xl font-bold uppercase mb-4 text-gray-800">Gestione Sessioni (Archivio)</h2>
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
+        <!-- GESTIONE SESSIONI E BACKUP -->
+        <h2 class="text-xl font-bold uppercase mb-4 text-gray-800">Gestione Sessioni & Backup</h2>
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
             <button type="button" class="btn shadow-md" onclick="showNewSessionModal()" style="background-color: #991b1b; color: white; border-color: #450a0a;">
                 🆕 Nuova Sessione
             </button>
             <button type="button" class="btn shadow-md" onclick="showArchiveModal()" style="background-color: #374151; color: white; border-color: #111827;">
                 📂 Archivio Storico
             </button>
+        </div>
+        <!-- Fact-Checking: Nuovi controlli per esportazione/importazione fisica del DB Locale -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
+            <button type="button" class="btn shadow-md" onclick="exportDatabase()" style="background-color: #0f766e; color: white; border-color: #115e59; font-size: 1rem;">
+                ⬇️ Esporta Backup Totale
+            </button>
+            <label class="btn shadow-md m-0 cursor-pointer" style="background-color: #047857; color: white; border-color: #064e3b; font-size: 1rem;">
+                ⬆️ Importa Backup
+                <input type="file" id="importDbInput" accept=".json" class="hidden" onchange="importDatabase(event)">
+            </label>
         </div>
     </main>
 
@@ -680,6 +690,10 @@
         window.confirmRenameSession = confirmRenameSession;
         window.closeDeleteArchiveSessionModal = closeDeleteArchiveSessionModal;
         window.confirmDeleteArchiveSession = confirmDeleteArchiveSession;
+
+        // Esponi funzioni di Backup / Ripristino
+        window.exportDatabase = exportDatabase;
+        window.importDatabase = importDatabase;
 
         // --- STATO DELL'APP ---
         let map;
@@ -991,6 +1005,73 @@
                     resolve(true);
                 };
             });
+        }
+
+        // --- FUNZIONALITA' DI BACKUP E RIPRISTINO (MIGRAZIONE DATI) ---
+        async function exportDatabase() {
+            try {
+                const sessions = await getArchivedSessions();
+                if (sessions.length === 0) {
+                    showErrorModal("L'Archivio Storico è vuoto. Nessun dato da esportare.");
+                    return;
+                }
+                
+                showToast("Preparazione backup in corso...");
+                const dataStr = JSON.stringify(sessions);
+                const blob = new Blob([dataStr], { type: "application/json" });
+                const url = URL.createObjectURL(blob);
+                
+                const link = document.createElement("a");
+                link.href = url;
+                const dateStr = new Date().toISOString().slice(0,10).replace(/-/g, "");
+                link.download = `Backup_Olivi_DB_${dateStr}.json`;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                URL.revokeObjectURL(url);
+                
+                showToast("Backup generato e scaricato con successo!");
+            } catch (err) {
+                console.error("Errore esportazione database:", err);
+                showErrorModal("Si è verificato un errore durante l'esportazione del backup.");
+            }
+        }
+
+        async function importDatabase(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = async function(e) {
+                try {
+                    const importedSessions = JSON.parse(e.target.result);
+                    if (!Array.isArray(importedSessions)) {
+                        throw new Error("Formato strutturale non valido.");
+                    }
+                    
+                    showToast("Importazione in corso, attendere...");
+                    let count = 0;
+                    for (const session of importedSessions) {
+                        if (session.id_sessione && session.data) {
+                            await new Promise((resolve) => {
+                                const transaction = localDB.transaction([archiveStoreName], "readwrite");
+                                const store = transaction.objectStore(archiveStoreName);
+                                // Il metodo put aggiunge la sessione o la sovrascrive se l'ID esiste già
+                                store.put(session).onsuccess = () => {
+                                    count++;
+                                    resolve();
+                                };
+                            });
+                        }
+                    }
+                    showToast(`Importazione completata: ${count} sessioni caricate nel dispositivo!`);
+                } catch (err) {
+                    console.error("Errore importazione JSON:", err);
+                    showErrorModal("Il file selezionato non è un backup valido o risulta corrotto.");
+                }
+                event.target.value = ''; // Resetta l'input per permettere nuovi caricamenti
+            };
+            reader.readAsText(file);
         }
 
         // --- INIZIALIZZAZIONE GOOGLE MAPS DINAMICA E API KEY ---

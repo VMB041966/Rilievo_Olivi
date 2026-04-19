@@ -8,7 +8,7 @@
     <!-- Tailwind CSS per UI Responsiva e High Contrast -->
     <script src="https://cdn.tailwindcss.com"></script>
     
-    <!-- Proj4js per conversione coordinate WGS84 -> UTM -->
+    <!-- Proj4js per conversione coordinate WGS84 -> UTM e viceversa -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/proj4js/2.9.0/proj4.js"></script>
     
     <!-- jsPDF per esportazione Report PDF -->
@@ -18,7 +18,7 @@
     <!-- JSZip per esportazione foto in formato .zip -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
 
-    <!-- html2canvas per esportazione mappa (Mantenuto come Fallback offline) -->
+    <!-- html2canvas per esportazione mappa -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 
     <style>
@@ -99,6 +99,16 @@
         .btn-secondary { background-color: #2563eb; color: white; border-color: #1e3a8a; }
         .btn-camera { background-color: #f59e0b; color: black; border-color: #78350f; }
         
+        /* Fact-Checking: Stile per il bottone disabilitato (Feedback Visivo di Rilievo Salvato) */
+        .btn:disabled {
+            background-color: #d1d5db !important; /* grigio inattivo */
+            color: #6b7280 !important;
+            border-color: #9ca3af !important;
+            cursor: not-allowed;
+            transform: none;
+            box-shadow: none;
+        }
+
         /* Nasconde l'input file reale */
         input[type="file"] { display: none; }
         
@@ -136,6 +146,29 @@
         }
         @keyframes fadein { from {bottom: 0; opacity: 0;} to {bottom: 30px; opacity: 1;} }
         @keyframes fadeout { from {bottom: 30px; opacity: 1;} to {bottom: 0; opacity: 0;} }
+
+        /* Override stili per bottoni UI piccoli (Compattati per Toolbar a singola riga) */
+        .btn-sm-ui {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 0.375rem 0.5rem;
+            font-size: 0.75rem;
+            font-weight: 700;
+            border-radius: 0.375rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            white-space: nowrap;
+        }
+        
+        /* Nasconde la scrollbar orizzontale mantenendo lo scroll tattile su mobile */
+        .scrollbar-hide::-webkit-scrollbar {
+            display: none;
+        }
+        .scrollbar-hide {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
+        }
     </style>
 </head>
 <body class="pb-24">
@@ -157,18 +190,52 @@
     <!-- Area Mappa -->
     <div class="relative w-full">
         <div id="map">Caricamento Mappa...</div>
-        <!-- Pulsante Zoom Globale ridimensionato e riposizionato per evitare sovrapposizioni -->
         <button type="button" onclick="zoomToAllMarkers()" class="absolute bottom-28 right-2 bg-white/90 hover:bg-white text-blue-800 border border-blue-500 font-bold px-2 py-1.5 rounded shadow-md active:bg-blue-100 z-[60] flex items-center justify-center space-x-1 transition-all" title="Adatta zoom a tutti i rilievi">
             <span class="text-sm">🌍</span> <span class="text-[10px] sm:text-xs uppercase leading-none">Zoom Globale</span>
         </button>
     </div>
+    
+    <!-- Fact-Checking: Toolbar Catastale su singola riga scorrevole (Flex-row, nowrap) -->
+    <div class="bg-gray-800 text-white p-2 flex flex-row items-center shadow-inner border-b-4 border-gray-900 gap-2 overflow-x-auto whitespace-nowrap scrollbar-hide">
+        
+        <label class="btn-sm-ui bg-blue-600 hover:bg-blue-700 text-white border border-blue-400 m-0 shrink-0">
+            📂 Carica (.geojson)
+            <input type="file" id="geojsonInput" accept=".geojson,.json" class="hidden" onchange="loadGeoJson(event)">
+        </label>
+        
+        <button type="button" onclick="clearGeoJson()" class="btn-sm-ui bg-red-600 hover:bg-red-700 text-white border border-red-400 hidden shrink-0" id="clearGeoJsonBtn">
+            🗑️ Rimuovi
+        </button>
+        
+        <button type="button" onclick="toggleGeoJsonVisibility()" class="btn-sm-ui bg-gray-600 hover:bg-gray-700 text-white border border-gray-400 hidden shrink-0" id="toggleGeoJsonBtn">
+            👁️ Nascondi
+        </button>
+        
+        <div id="searchParcelContainer" class="flex items-center bg-gray-700 rounded border border-gray-600 shrink-0 h-[28px]" style="display:none;">
+            <input type="text" id="searchParcelInput" class="bg-gray-900 text-white font-bold text-xs px-2 h-full rounded-l border-none focus:outline-none focus:ring-1 focus:ring-blue-500 w-20" placeholder="Particella" onkeypress="if(event.key === 'Enter') { event.preventDefault(); searchParcel(); }">
+            <button type="button" onclick="searchParcel()" class="text-gray-300 hover:text-white px-2 h-full font-bold flex items-center justify-center text-xs" title="Cerca e Centra in mappa">🔍</button>
+        </div>
+        
+        <!-- Spaziatore flessibile per allineare a destra la trasparenza se lo schermo è largo -->
+        <div class="flex-grow min-w-[4px]"></div>
+
+        <!-- Barra Trasparenza Ridotta -->
+        <div class="flex items-center shrink-0" id="geojsonOpacityContainer" style="display:none;">
+            <label for="catastoOpacity" class="font-bold uppercase text-[10px] mr-2 text-gray-400 tracking-wider">Trasp.</label>
+            <input type="range" id="catastoOpacity" min="0.1" max="1" step="0.1" value="0.5" class="w-16 accent-blue-500" oninput="updateGeoJsonStyle()">
+            <span id="catastoOpacityValue" class="ml-1 font-mono font-bold text-yellow-400 text-xs w-8 text-right">50%</span>
+        </div>
+        
+    </div>
+
     <div class="bg-yellow-200 text-black text-center text-sm p-1 font-semibold border-b-2 border-yellow-400">
         Tocca la mappa per impostare o correggere le coordinate della pianta.
     </div>
 
     <!-- Container Form -->
     <main class="p-4 max-w-3xl mx-auto mt-4">
-        <form id="treeForm" onsubmit="event.preventDefault(); saveTree();">
+        <!-- Fact-Checking: Aggiunti oninput e onchange per rilevare qualsiasi attività propedeutica a un nuovo rilievo -->
+        <form id="treeForm" onsubmit="event.preventDefault(); saveTree();" oninput="enableSaveButton()" onchange="enableSaveButton()">
             
             <!-- Committente -->
             <div class="mb-4">
@@ -263,7 +330,6 @@
                 <label class="label-text">Fotografia (Verticale 4:3)</label>
                 <label class="btn btn-camera">
                     📸 Scatta Foto
-                    <!-- capture="environment" forza la fotocamera posteriore su mobile -->
                     <input type="file" id="photoInput" accept="image/*" capture="environment" onchange="handlePhoto(event)">
                 </label>
                 <input type="hidden" id="photoFileName">
@@ -273,19 +339,19 @@
             </div>
 
             <!-- Salva -->
-            <button type="submit" class="btn btn-primary mb-8">
+            <button type="submit" id="saveTreeBtn" class="btn btn-primary mb-8">
                 💾 Salva Rilievo Pianta
             </button>
         </form>
 
         <hr class="border-2 border-gray-300 my-8">
 
-        <!-- Pulsante di Salvataggio Sicurezza (Spostato in alto per evitare lo scroll) -->
+        <!-- Pulsante di Salvataggio Sicurezza -->
         <button type="button" class="btn mb-8 shadow-lg" onclick="forceCloudSync()" style="background-color: #0284c7; color: white; border-color: #0369a1; font-size: 1.1rem;">
             💾 Salva Dati (Backup in memoria)
         </button>
 
-        <!-- Lista Rilievi Effettuati (Per Cancellazione) -->
+        <!-- Lista Rilievi Effettuati -->
         <h2 class="text-xl font-bold uppercase mb-4 text-gray-800">Rilievi Effettuati</h2>
         <div id="recordsList" class="mb-8 space-y-3">
             <p class="text-gray-500 italic">Nessun rilievo salvato.</p>
@@ -586,10 +652,20 @@
         window.closeGpsPermissionModal = closeGpsPermissionModal;
         window.saveApiKeyAndLoadMap = saveApiKeyAndLoadMap;
         window.centerMapOnTree = centerMapOnTree;
-        window.zoomToAllMarkers = zoomToAllMarkers; // Esposizione nuova funzione
+        window.zoomToAllMarkers = zoomToAllMarkers; 
         window.editTree = editTree;
         window.closeEditModal = closeEditModal;
         window.saveEditedTree = saveEditedTree;
+        
+        // Esposizione funzioni UI per il bottone di salvataggio
+        window.enableSaveButton = enableSaveButton;
+        
+        // Esponi funzioni di caricamento GeoJSON
+        window.loadGeoJson = loadGeoJson;
+        window.clearGeoJson = clearGeoJson;
+        window.updateGeoJsonStyle = updateGeoJsonStyle;
+        window.toggleGeoJsonVisibility = toggleGeoJsonVisibility; 
+        window.searchParcel = searchParcel; // Esposizione nuova funzione di ricerca
         
         // Esponi funzioni di gestione sessione
         window.showNewSessionModal = showNewSessionModal;
@@ -607,17 +683,25 @@
 
         // --- STATO DELL'APP ---
         let map;
-        let userMarker; // Posizione GPS dell'utente
-        let pinMarker;  // Posizione toccata per la nuova pianta
-        let treesDatabase = []; // Array per memorizzare i record in RAM
-        let treeToDeleteId = null; // Memorizza l'ID in attesa di cancellazione
-        let savedMarkers = []; // Array per i marker gialli delle piante già salvate
-        let currentClickLatLng = null; // Memorizza Lat/Lng reali al momento del tocco sulla mappa
+        let userMarker; 
+        let pinMarker;  
+        let treesDatabase = []; 
+        let treeToDeleteId = null; 
+        let savedMarkers = []; 
+        let currentClickLatLng = null; 
+        let customCursorStyle = null; // Aggiunto per rendere il cursore a crocicchio globale
+        
+        // Stato Vettoriale Catastale
+        let hasGeoJsonLoaded = false;
+        let geoJsonInfoWindow = null;
+        let isGeoJsonVisible = true; // Variabile di stato per la visibilità del layer
+        let highlightedFeatures = []; // Array per memorizzare la particella ricercata da evidenziare
+        let infoWindowTimeout = null; // Fact-Checking: Timer per la chiusura automatica del popup
 
         // --- GESTIONE DATABASE LOCALE E ARCHIVIO (INDEXED DB - V.2) ---
         const dbName = "OliviDB";
-        const storeName = "rilievi";             // La sessione attiva (il banco di lavoro)
-        const archiveStoreName = "sessioni_salvate"; // L'archivio di tutte le vecchie giornate
+        const storeName = "rilievi";             
+        const archiveStoreName = "sessioni_salvate"; 
         let localDB;
 
         function initLocalDB() {
@@ -935,7 +1019,8 @@
             document.getElementById("gpsStatus").innerText = "Caricamento librerie mappa...";
 
             const script = document.createElement('script');
-            script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&callback=initMap`;
+            // Fact-Checking: Aggiunta esplicita della libreria geometry per il calcolo metrico di prossimità
+            script.src = `https://maps.googleapis.com/maps/api/js?key=${apiKey}&libraries=geometry&callback=initMap`;
             script.async = true;
             script.defer = true;
             
@@ -975,7 +1060,7 @@
             `;
             
             const cursorUrl = 'data:image/svg+xml;charset=UTF-8,' + encodeURIComponent(crosshairSvg.trim());
-            const customCursor = `url('${cursorUrl}') 16 16, crosshair`;
+            customCursorStyle = `url('${cursorUrl}') 16 16, crosshair`;
 
             map = new google.maps.Map(document.getElementById("map"), {
                 zoom: 18,
@@ -983,8 +1068,69 @@
                 mapTypeId: "satellite",
                 disableDefaultUI: true,
                 zoomControl: true,
-                draggableCursor: customCursor,
-                draggingCursor: customCursor
+                draggableCursor: customCursorStyle,
+                draggingCursor: customCursorStyle
+            });
+
+            // Gestione Livello GeoJSON Catastale
+            geoJsonInfoWindow = new google.maps.InfoWindow();
+            
+            updateGeoJsonStyle();
+
+            // Motore di Lettura Dati Catastali (Ripristinato alla versione stabile)
+            map.data.addListener('click', function(event) {
+                // Fact-Checking: Passa immediatamente le coordinate al modulo di rilievo!
+                // Ora toccare la particella piazza ANCHE il marker della pianta per estrarre l'UTM.
+                placeMarkerAndGetUTM(event.latLng);
+
+                let content = '<div class="text-sm p-2 font-sans text-gray-800">';
+                content += '<h4 class="font-bold border-b-2 border-gray-300 mb-2 pb-1 uppercase text-blue-800">Dati Catastali</h4>';
+                let foundProps = false;
+                
+                const clickedFeature = event.feature;
+                const featureId = clickedFeature.getId();
+                
+                if (featureId) {
+                    content += `<b class="uppercase text-xs text-blue-600">ID:</b> <span class="font-semibold text-gray-900">${featureId}</span><br>`;
+                    foundProps = true;
+                }
+                
+                clickedFeature.forEachProperty(function(value, property) {
+                    if (property === 'bbox' || property === 'geometry' || property === 'style') return;
+                    
+                    let displayValue = "N/D";
+                    if (value !== null && value !== undefined) {
+                        if (typeof value === 'object') {
+                            try { displayValue = JSON.stringify(value).replace(/["'{}]/g, '').replace(/,/g, ', '); }
+                            catch(e) { displayValue = "[Dato Complesso]"; }
+                        } else {
+                            displayValue = String(value).trim();
+                        }
+                    }
+                    
+                    if (displayValue === "") displayValue = "N/D";
+                    
+                    // Fact-Checking: Evidenzia visivamente il numero di particella (CODICE) per lettura immediata in campo
+                    if (property.toUpperCase() === 'CODICE') {
+                        content += `<b class="uppercase text-xs text-red-600">PARTICELLA (${property}):</b> <span class="font-bold text-red-700 text-base">${displayValue}</span><br>`;
+                    } else {
+                        content += `<b class="uppercase text-xs text-gray-500">${property}:</b> <span class="font-semibold text-gray-900">${displayValue}</span><br>`;
+                    }
+                    foundProps = true;
+                });
+                
+                if (!foundProps) content += 'Nessun metadato associato alla geometria.';
+                content += '</div>';
+                
+                geoJsonInfoWindow.setContent(content);
+                geoJsonInfoWindow.setPosition(event.latLng);
+                geoJsonInfoWindow.open(map);
+
+                // Fact-Checking: Chiusura automatica del popup dopo 5 secondi per non intralciare il rilievo in campo
+                if (infoWindowTimeout) clearTimeout(infoWindowTimeout);
+                infoWindowTimeout = setTimeout(() => {
+                    geoJsonInfoWindow.close();
+                }, 5000);
             });
 
             map.addListener("click", (e) => {
@@ -993,6 +1139,275 @@
 
             startGPS();
             renderSavedTreeMarkers();
+        }
+        
+        // --- FUNZIONALITA' GEOJSON E MOTORE DI RIPROIEZIONE AL VOLO ---
+        function loadGeoJson(event) {
+            const file = event.target.files[0];
+            if (!file) return;
+
+            const reader = new FileReader();
+            reader.onload = function(e) {
+                try {
+                    const geojson = JSON.parse(e.target.result);
+                    
+                    // --- INIZIO FACT-CHECKING E CONVERSIONE AL VOLO ---
+                    const projWGS84 = "+proj=longlat +datum=WGS84 +no_defs";
+                    const projUTM33 = "+proj=utm +zone=33 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs";
+
+                    function convertCoords(coords) {
+                        if (Array.isArray(coords) && coords.length >= 2 && typeof coords[0] === 'number') {
+                            if (Math.abs(coords[0]) > 180) {
+                                const wgsCoords = proj4(projUTM33, projWGS84, [coords[0], coords[1]]);
+                                coords[0] = wgsCoords[0]; 
+                                coords[1] = wgsCoords[1]; 
+                            }
+                        } else if (Array.isArray(coords)) {
+                            for (let i = 0; i < coords.length; i++) {
+                                convertCoords(coords[i]);
+                            }
+                        }
+                    }
+
+                    if (geojson.features) {
+                        geojson.features.forEach(feature => {
+                            if (feature.geometry && feature.geometry.coordinates) {
+                                convertCoords(feature.geometry.coordinates);
+                            }
+                        });
+                    }
+                    // --- FINE CONVERSIONE ---
+
+                    clearGeoJson(false); 
+                    
+                    map.data.addGeoJson(geojson);
+                    
+                    const bounds = new google.maps.LatLngBounds();
+                    map.data.forEach(function(feature) {
+                        processGeoJsonGeometry(feature.getGeometry(), bounds.extend, bounds);
+                    });
+                    
+                    if (!bounds.isEmpty()) {
+                        map.fitBounds(bounds);
+                        google.maps.event.addListenerOnce(map, 'bounds_changed', function() {
+                            if (this.getZoom() > 20) this.setZoom(20);
+                        });
+                    }
+
+                    hasGeoJsonLoaded = true;
+                    isGeoJsonVisible = true; // Resetta lo stato di visibilità
+                    
+                    document.getElementById('clearGeoJsonBtn').classList.remove('hidden');
+                    
+                    // Mostra e formatta il bottone di Toggle mantenendo lo shrink-0 per la singola riga
+                    const toggleBtn = document.getElementById('toggleGeoJsonBtn');
+                    toggleBtn.classList.remove('hidden');
+                    toggleBtn.innerHTML = '👁️ Nascondi';
+                    toggleBtn.className = 'btn-sm-ui bg-gray-600 hover:bg-gray-700 text-white border border-gray-400 shrink-0';
+                    
+                    document.getElementById('geojsonOpacityContainer').style.display = 'flex';
+                    document.getElementById('searchParcelContainer').style.display = 'flex'; // Mostra campo di ricerca
+                    updateGeoJsonStyle(); 
+                    
+                    showToast("Catasto vettoriale convertito, caricato e georeferenziato.");
+                } catch (err) {
+                    console.error("Errore GeoJSON:", err);
+                    showErrorModal("Errore durante la lettura del file. Assicurati che sia un formato GeoJSON valido.");
+                }
+                
+                event.target.value = '';
+            };
+            reader.readAsText(file);
+        }
+
+        function processGeoJsonGeometry(geometry, callback, thisArg) {
+            if (!geometry) return;
+            if (geometry instanceof google.maps.LatLng) {
+                callback.call(thisArg, geometry);
+            } else if (geometry instanceof google.maps.Data.Point) {
+                callback.call(thisArg, geometry.get());
+            } else {
+                geometry.getArray().forEach(function(g) {
+                    processGeoJsonGeometry(g, callback, thisArg);
+                });
+            }
+        }
+
+        function clearGeoJson(notify = true) {
+            map.data.forEach(function(feature) {
+                map.data.remove(feature);
+            });
+            hasGeoJsonLoaded = false;
+            isGeoJsonVisible = true;
+            highlightedFeatures = []; // Azzera le evidenziazioni
+            
+            if (infoWindowTimeout) clearTimeout(infoWindowTimeout); // Pulisce il timer se attivo
+            
+            document.getElementById('clearGeoJsonBtn').classList.add('hidden');
+            document.getElementById('toggleGeoJsonBtn').classList.add('hidden'); 
+            document.getElementById('geojsonOpacityContainer').style.display = 'none';
+            document.getElementById('searchParcelContainer').style.display = 'none'; // Nasconde la ricerca
+            document.getElementById('searchParcelInput').value = ''; // Azzera input
+            if (geoJsonInfoWindow) geoJsonInfoWindow.close();
+            if (notify) showToast("Mappa catastale rimossa.");
+        }
+
+        // --- FUNZIONALITA' DI RICERCA PARTICELLA E EVIDENZIAZIONE ---
+        function searchParcel() {
+            if (!hasGeoJsonLoaded) return;
+            
+            const searchInput = document.getElementById('searchParcelInput');
+            const parcelNumber = searchInput.value.trim().toUpperCase();
+            
+            // Se l'utente svuota il campo e preme invio, azzeriamo l'evidenziazione
+            if (!parcelNumber) {
+                highlightedFeatures = [];
+                updateGeoJsonStyle();
+                showToast("Ricerca azzerata. Reticolo ripristinato.");
+                searchInput.blur();
+                return;
+            }
+
+            // Se il livello catastale era stato spento (👁️ Mostra), lo riaccende in automatico
+            if (!isGeoJsonVisible) {
+                toggleGeoJsonVisibility();
+            }
+
+            let found = false;
+            const bounds = new google.maps.LatLngBounds();
+            highlightedFeatures = []; // Svuota la precedente ricerca
+
+            map.data.forEach(function(feature) {
+                let isMatch = false;
+                const fId = feature.getId();
+                
+                // Ricerca robusta sull'ID (Es: "109", "CP.CadastralParcel.109")
+                if (fId && (String(fId).toUpperCase() === parcelNumber || 
+                            String(fId).toUpperCase().endsWith('.' + parcelNumber) || 
+                            String(fId).toUpperCase().endsWith('_' + parcelNumber))) {
+                    isMatch = true;
+                }
+
+                // Ricerca classica nei metadati catastali
+                if (!isMatch) {
+                    feature.forEachProperty(function(value, property) {
+                        if (value !== null && value !== undefined) {
+                            const valStr = String(value).trim().toUpperCase();
+                            const propStr = property.toUpperCase();
+                            if (valStr === parcelNumber && (propStr.includes('CODICE') || propStr.includes('NUMERO') || propStr.includes('PARTICELLA'))) {
+                                isMatch = true;
+                            }
+                        }
+                    });
+                }
+
+                // Se c'è una corrispondenza, estende matematicamente l'ingombro e salva la feature per l'evidenziazione
+                if (isMatch) {
+                    found = true;
+                    highlightedFeatures.push(feature); // Memorizza la geometria per verniciarla di verde
+                    processGeoJsonGeometry(feature.getGeometry(), bounds.extend, bounds);
+                }
+            });
+
+            if (found && !bounds.isEmpty()) {
+                // Ridisegna il livello catastale applicando il nuovo stile verde brillante alla particella trovata
+                updateGeoJsonStyle();
+
+                // Ordina a Google Maps di inquadrare la mappa in base ai confini estremi trovati
+                map.fitBounds(bounds);
+                
+                // Limite di sicurezza: evita un overzoom "sgranato" se la particella è microscopica
+                google.maps.event.addListenerOnce(map, 'bounds_changed', function() {
+                    if (this.getZoom() > 22) this.setZoom(22);
+                });
+                
+                showToast(`Particella ${parcelNumber} evidenziata in verde e centrata in mappa.`);
+                searchInput.blur(); // Nasconde la tastiera su smartphone
+                window.scrollTo({ top: 0, behavior: 'smooth' }); // Riporta l'utente in cima alla mappa
+            } else {
+                // Se non trova nulla, resetta comunque l'evidenziazione
+                highlightedFeatures = [];
+                updateGeoJsonStyle();
+                showErrorModal(`Attenzione: La particella "${parcelNumber}" non è presente in questo foglio o file catastale.`);
+            }
+        }
+
+        // Nuova funzione per lo spegnimento/accensione rapida del Layer
+        function toggleGeoJsonVisibility() {
+            if (!hasGeoJsonLoaded) return;
+            
+            isGeoJsonVisible = !isGeoJsonVisible;
+            const btn = document.getElementById('toggleGeoJsonBtn');
+
+            if (isGeoJsonVisible) {
+                btn.innerHTML = '👁️ Nascondi';
+                btn.className = 'btn-sm-ui bg-gray-600 hover:bg-gray-700 text-white border border-gray-400 shrink-0';
+                showToast("Livello catastale attivato.");
+            } else {
+                btn.innerHTML = '👁️‍🗨️ Mostra';
+                btn.className = 'btn-sm-ui bg-indigo-600 hover:bg-indigo-700 text-white border border-indigo-400 shrink-0';
+                showToast("Livello catastale spento.");
+                if (geoJsonInfoWindow) geoJsonInfoWindow.close(); // Chiude eventuali popup aperti
+            }
+
+            updateGeoJsonStyle(); // Ricalcola lo stile applicando la regola di visibilità
+        }
+
+        function updateGeoJsonStyle() {
+            const opacityInput = document.getElementById('catastoOpacity');
+            const opacity = opacityInput ? parseFloat(opacityInput.value) : 0.5;
+            
+            const opacityValueDisplay = document.getElementById('catastoOpacityValue');
+            if (opacityValueDisplay) {
+                opacityValueDisplay.innerText = Math.round(opacity * 100) + '%';
+            }
+            
+            map.data.setStyle(function(feature) {
+                // Se l'utente ha "spento" il layer, restituisce visibilità falsa per tutto (Punti e Poligoni)
+                if (!isGeoJsonVisible) {
+                    return { visible: false };
+                }
+
+                const geom = feature.getGeometry();
+                
+                // Ripristinata la visibilità di default delle icone a goccia rossa per garantire
+                // la lettura in campo in caso di particelle disassate.
+                if (geom && (geom.getType() === 'Point' || geom.getType() === 'MultiPoint')) {
+                    return { 
+                        visible: true,
+                        cursor: customCursorStyle // Forza il crocicchio anche sui punti
+                    };
+                }
+                
+                // Fact-Checking Topografico: Controllo dinamico dell'evidenziazione.
+                // Se la feature in esame è quella appena ricercata dall'utente, applica lo stile speciale.
+                const isHighlighted = highlightedFeatures.includes(feature);
+
+                if (isHighlighted) {
+                    return {
+                        visible: true,
+                        fillColor: '#22c55e', // Verde brillante base per il riempimento
+                        fillOpacity: opacity * 0.6, // Leggermente più coprente del giallo
+                        strokeColor: '#00FF00', // Verde fluo puro per il perimetro (massimo contrasto su ortofoto)
+                        strokeOpacity: Math.min(1, opacity + 0.5), 
+                        strokeWeight: 3, // Spessore calibrato a 3 pixel per spiccare senza coprire l'ortofoto
+                        zIndex: 999, // Forza la particella ricercata al di sopra di tutte le linee gialle adiacenti
+                        cursor: customCursorStyle // Forza il crocicchio
+                    };
+                }
+
+                // Stile di default (Giallo) per tutte le altre particelle del foglio
+                return {
+                    visible: true, 
+                    fillColor: '#FACC15', 
+                    fillOpacity: opacity * 0.35, 
+                    strokeColor: '#FFFF00', 
+                    strokeOpacity: Math.min(1, opacity + 0.4), 
+                    strokeWeight: 2,
+                    zIndex: 1,
+                    cursor: customCursorStyle // Forza il crocicchio su tutta la rete catastale
+                };
+            });
         }
 
         function startGPS() {
@@ -1124,11 +1539,15 @@
 
             document.getElementById("coordE").value = `${easting} m Est`;
             document.getElementById("coordN").value = `${northing} m Nord`;
+            
+            enableSaveButton(); // Riattiva il bottone di salvataggio al tocco sulla mappa per una nuova pianta
         }
 
         function handlePhoto(event) {
             const file = event.target.files[0];
             if (!file) return;
+
+            enableSaveButton(); // Riattiva il bottone di salvataggio all'acquisizione della nuova foto
 
             const now = new Date();
             const pad = (n) => String(n).padStart(2, '0');
@@ -1239,6 +1658,8 @@
             pinMarker = null;
             currentClickLatLng = null;
 
+            disableSaveButton(); // Fact-Checking: Disabilita immediatamente il bottone per prevenire doppi click accidentali
+
             showToast("Salvataggio permanente in memoria in corso...");
             const saveSuccess = await saveToLocalDB(treeRecord);
             if (saveSuccess) {
@@ -1250,12 +1671,28 @@
             window.scrollTo(0, 0);
         }
 
+        // --- GESTIONE UI BOTTONE SALVATAGGIO ---
+        function disableSaveButton() {
+            const btn = document.getElementById("saveTreeBtn");
+            if (btn) {
+                btn.disabled = true;
+                btn.innerHTML = "✅ Rilievo Salvato";
+            }
+        }
+
+        function enableSaveButton() {
+            const btn = document.getElementById("saveTreeBtn");
+            if (btn && btn.disabled) {
+                btn.disabled = false;
+                btn.innerHTML = "💾 Salva Rilievo Pianta";
+            }
+        }
+
         // --- FUNZIONALITA' DI MODIFICA RILIEVO ---
         function editTree(id) {
             const tree = treesDatabase.find(t => t.id === id);
             if(!tree) return;
             
-            // Popola i campi della modale di modifica
             document.getElementById("editTreeId").value = tree.id;
             document.getElementById("editTreeIdDisplay").innerText = tree.id;
             
@@ -1270,7 +1707,6 @@
             document.getElementById("editCoordN").value = tree.coord_n;
             document.getElementById("editCoordE").value = tree.coord_e;
             
-            // Preparazione preview fotografica corrente (immodificabile)
             document.getElementById("editPhotoPreview").src = tree.foto_dati;
             document.getElementById("editPhotoNameDisplay").innerText = "File vincolato: " + tree.foto_nome;
 
@@ -1288,7 +1724,6 @@
 
             const tree = treesDatabase[treeIndex];
             
-            // Aggiorna solo i dati consentiti (ID, Coordinate e Foto restano intatti)
             tree.comune = document.getElementById("editComune").value;
             tree.foglio = document.getElementById("editFoglio").value;
             tree.particella = document.getElementById("editParticella").value;
@@ -1302,7 +1737,7 @@
             showToast("Aggiornamento in corso...");
             await saveToLocalDB(tree);
             
-            renderTreeList(); // Aggiorna sia la lista che i colori dei marker in mappa!
+            renderTreeList(); 
             closeEditModal();
             showToast("Rilievo " + id + " aggiornato con successo!");
         }
@@ -1391,7 +1826,6 @@
             }
         }
 
-        // --- FUNZIONE ZOOM GLOBALE SU TUTTI I RILIEVI ---
         function zoomToAllMarkers() {
             if (!map) return;
             
@@ -1402,15 +1836,12 @@
 
             const bounds = new google.maps.LatLngBounds();
             
-            // Estende i confini della mappa per includere ogni singolo marker salvato
             savedMarkers.forEach(marker => {
                 bounds.extend(marker.getPosition());
             });
 
             map.fitBounds(bounds);
 
-            // Fact-Checking: Se c'è una sola pianta, fitBounds applica uno zoom esagerato.
-            // Lo intercettiamo e lo limitiamo a un livello più leggibile topograficamente.
             if (savedMarkers.length === 1) {
                 google.maps.event.addListenerOnce(map, 'bounds_changed', function() {
                     if (this.getZoom() > 19) {
@@ -1421,7 +1852,6 @@
                 showToast("Inquadratura adattata a tutti i campionamenti.");
             }
             
-            // Scorre la vista verso l'alto per mostrare la mappa completa all'utente
             window.scrollTo({ top: 0, behavior: 'smooth' });
         }
 
@@ -1502,7 +1932,6 @@
 
         document.getElementById("confirmDeleteBtn").addEventListener("click", async () => {
             if (treeToDeleteId) {
-                // Salviamo l'ID in una costante locale per evitare errori asincroni
                 const idToDelete = treeToDeleteId;
                 
                 treesDatabase = treesDatabase.filter(t => t.id !== idToDelete);
@@ -1511,7 +1940,6 @@
                 renderTreeList();
                 updateNextId(); 
                 
-                // Chiudiamo in sicurezza ora che il dato è salvato
                 closeDeleteModal();
 
                 if (localDB) {
@@ -1523,7 +1951,6 @@
             }
         });
 
-        // --- GESTIONE MODAL ERRORE/AVVISI ---
         function showErrorModal(msg) {
             document.getElementById("errorModalMsg").innerText = msg;
             document.getElementById("errorModal").classList.remove("hidden");
@@ -1533,7 +1960,6 @@
             document.getElementById("errorModal").classList.add("hidden");
         }
 
-        // Recupera in sicurezza il nome del committente per i nomi dei file
         function getSafeCommittente() {
             let nomeCommittente = document.getElementById("committente").value.trim();
             if (!nomeCommittente && treesDatabase.length > 0 && treesDatabase[0].committente) {
@@ -1552,7 +1978,6 @@
 
             let csvContent = "ID_Pianta;Committente;Tecnico;Comune;Foglio_Mappa;Particella;Coord_Nord_UTM_WGS84;Coord_Est_UTM_WGS84;Classe_Diametrica;Monumentalita;Ambiente;Note;Nome_File_Foto\n";
 
-            // Fact-Checking: Ordina rigorosamente i record per ID crescente prima dell'esportazione
             const sortedTrees = [...treesDatabase].sort((a, b) => parseInt(a.id, 10) - parseInt(b.id, 10));
 
             sortedTrees.forEach(row => {
@@ -1587,7 +2012,6 @@
             showToast("Download CSV avviato");
         }
 
-        // Assign jsPDF to window globally to satisfy jspdf-autotable requirements internally
         window.jsPDF = window.jspdf.jsPDF;
 
         // --- ESPORTAZIONE PDF (MOTORE DI RENDERING DINAMICO) ---
@@ -1609,7 +2033,6 @@
                 return;
             }
 
-            // Fact-Checking: Ordina rigorosamente i record per ID crescente prima di filtrare e impaginare
             let filteredTrees = [...treesDatabase].sort((a, b) => parseInt(a.id, 10) - parseInt(b.id, 10));
             let fileSuffix = "Globale";
             let reportSubtitle = "";
@@ -1641,20 +2064,18 @@
             let currentY = 28;
             let startYTable = 35;
 
-            // Inserimento del sottotitolo al 2° rigo se presente
             if (reportSubtitle !== "") {
                 doc.setFont("helvetica", "italic");
                 doc.setFontSize(13);
                 doc.text(reportSubtitle, 14, 27);
-                currentY = 34; // Scala la riga successiva
-                startYTable = 41; // Scala l'inizio della tabella
+                currentY = 34; 
+                startYTable = 41; 
             }
 
             doc.setFont("helvetica", "normal");
             doc.setFontSize(11);
             const dateStr = new Date().toLocaleDateString('it-IT');
             
-            // Fact-Checking: Calcolo e testo dinamico in base al tipo di report richiesto
             let countText = "";
             if (filterType === 'NON MONUMENTALE') {
                 const countNonMonumentali = treesDatabase.filter(t => t.monumentalita === "NON MONUMENTALE").length;
@@ -1784,7 +2205,7 @@
             let nomeTecnico = document.getElementById("tecnico").value.trim();
             if (!nomeTecnico && treesDatabase.length > 0 && treesDatabase[0].tecnico) nomeTecnico = treesDatabase[0].tecnico;
             const buildVersion = document.getElementById("appVersion").innerText;
-            const appInfoTesto = `Rilievo Olivi - ${buildVersion}`; // Fact-Checking: inserito per ripristinare il blocco PDF
+            const appInfoTesto = `Rilievo Olivi - ${buildVersion}`; 
 
             for (let i = 1; i <= totalPages; i++) {
                 doc.setPage(i);
@@ -1814,7 +2235,6 @@
 
         // --- ESPORTAZIONE ARCHIVIO FOTO (ZIP) ---
         async function exportZIP() {
-            // Fact-Checking: Ordina per ID crescente per garantire la corretta sequenza anche nell'estrazione dei file
             const sortedTrees = [...treesDatabase].sort((a, b) => parseInt(a.id, 10) - parseInt(b.id, 10));
             const treesWithPhotos = sortedTrees.filter(t => t.foto_dati);
             
@@ -1861,16 +2281,15 @@
 
             const apiKey = localStorage.getItem('gmaps_api_key');
             
-            // Metodo primario: Google Static Maps API (Bypassa i blocchi CORS del browser)
-            if (apiKey) {
+            // Fact-Checking: Se c'è un file vettoriale GeoJSON caricato, le API Static Maps non possono elaborarlo.
+            // In quel caso si attiva dinamicamente e forzosamente l'esportazione di "fallback" fotografico html2canvas.
+            if (apiKey && !hasGeoJsonLoaded) {
                 try {
                     const center = map.getCenter();
                     const zoom = map.getZoom();
                     
-                    // Richiesta Ortofoto Google ad alta risoluzione
                     let staticMapUrl = `https://maps.googleapis.com/maps/api/staticmap?center=${center.lat()},${center.lng()}&zoom=${zoom}&size=640x400&scale=2&maptype=satellite&key=${apiKey}`;
 
-                    // Aggiunta Markers vettoriali (limite prudenziale per non sforare la lunghezza URL)
                     treesDatabase.slice(0, 75).forEach(tree => {
                         if (tree.lat && tree.lng) {
                             const color = tree.monumentalita === "MONUMENTALE" ? "purple" : "yellow";
@@ -1878,7 +2297,6 @@
                         }
                     });
 
-                    // Caricamento Immagine via CORS nativo bypassando html2canvas
                     const img = new Image();
                     img.crossOrigin = "Anonymous";
                     
@@ -1899,12 +2317,13 @@
                     };
                     
                     img.src = staticMapUrl;
-                    return; // Attende l'evento onload dell'immagine
+                    return; 
                 } catch(e) {
                     console.error("Errore di rendering primario", e);
                     await exportMapPDFFallback();
                 }
             } else {
+                if (hasGeoJsonLoaded) console.log("Catasto Vettoriale rilevato. Forzo esportazione grafica html2canvas.");
                 await exportMapPDFFallback();
             }
         }
@@ -1912,10 +2331,8 @@
         async function exportMapPDFFallback() {
             const mapElement = document.getElementById("map");
             
-            // Fact-Checking: Disattivazione temporanea dei controlli UI di Google Maps per una stampa pulita
             if (map) map.setOptions({ zoomControl: false, fullscreenControl: false });
             
-            // Breve attesa per permettere al DOM di aggiornarsi e far sparire i bottoni prima dello scatto
             await new Promise(resolve => setTimeout(resolve, 400));
 
             try {
@@ -1930,12 +2347,10 @@
                 console.error("Errore generazione mappa PDF html2canvas:", error);
                 showErrorModal("Impossibile catturare la mappa per limitazioni di sicurezza del browser. Prova con uno screenshot manuale o verifica l'API Key.");
             } finally {
-                // Ripristino immediato dei controlli UI sulla mappa live al termine dell'esportazione
                 if (map) map.setOptions({ zoomControl: true, fullscreenControl: false });
             }
         }
 
-        // Funzione isolata e sicura per comporre e scaricare la Mappa in PDF
         function buildAndSaveMapPDF(imgData) {
             const doc = new window.jsPDF('landscape'); 
             
@@ -1953,14 +2368,68 @@
             doc.setFont("helvetica", "normal");
             doc.setFontSize(15);
             doc.text("Planimetria Rilievi - Classificazione olivi (L.R. Puglia 14/2007)", 14, 20);
-            doc.setFontSize(11);
-            const dateStr = new Date().toLocaleDateString('it-IT');
             
+            doc.setFontSize(11);
+
+            // --- INIZIO FACT-CHECKING: Estrazione, raggruppamento e ordinamento riferimenti catastali ---
+            let catastaliMap = new Map();
+            treesDatabase.forEach(t => {
+                if (!t.foglio) return;
+                const f = String(t.foglio).trim();
+                const c = t.comune ? String(t.comune).trim() : "N/D";
+                const p = t.particella ? String(t.particella).trim() : "";
+
+                // Crea la struttura per il foglio se non esiste
+                if (!catastaliMap.has(f)) {
+                    catastaliMap.set(f, { comune: c, particelle: new Set() });
+                }
+                // Aggiunge la particella al Set (evita in automatico i doppioni)
+                if (p) {
+                    catastaliMap.get(f).particelle.add(p);
+                }
+            });
+
+            let catastaliList = Array.from(catastaliMap.keys()).map(f => {
+                return {
+                    foglio: f,
+                    comune: catastaliMap.get(f).comune,
+                    particelle: Array.from(catastaliMap.get(f).particelle)
+                };
+            });
+
+            // Ordina la lista dei Fogli in ordine crescente (es. 2, 15, 20)
+            catastaliList.sort((a, b) => a.foglio.localeCompare(b.foglio, undefined, {numeric: true, sensitivity: 'base'}));
+
+            let currentY = 27; // Punto di partenza verticale
+
+            if (catastaliList.length === 0) {
+                doc.text(`Comune: N/D - Foglio di mappa: N/D - Particella/e: N/D`, 14, currentY);
+                currentY += 6;
+            } else {
+                catastaliList.forEach(item => {
+                    // Ordina le Particelle all'interno del Foglio in ordine crescente
+                    item.particelle.sort((a, b) => a.localeCompare(b, undefined, {numeric: true, sensitivity: 'base'}));
+                    let partStr = item.particelle.length > 0 ? item.particelle.join(", ") : "N/D";
+                    
+                    doc.text(`Comune: ${item.comune} - Foglio di mappa: ${item.foglio} - Particella/e: ${partStr}`, 14, currentY);
+                    currentY += 6; // Scala di un rigo verso il basso per l'eventuale Foglio successivo
+                });
+            }
+            // --- FINE ---
+
+            const dateStr = new Date().toLocaleDateString('it-IT');
             const countMonumentali = treesDatabase.filter(t => t.monumentalita === "MONUMENTALE").length;
-            doc.text(`Data: ${dateStr} - Totale Piante: ${treesDatabase.length} di cui Monumentali: ${countMonumentali}`, 14, 28);
+            
+            // La Y di questi testi è ora dinamicamente spinta verso il basso in base al numero di righi catastali
+            doc.text(`Data: ${dateStr} - Totale Piante: ${treesDatabase.length} di cui Monumentali: ${countMonumentali}`, 14, currentY);
 
             const pdfMaxWidth = 269;
-            const pdfMaxHeight = 155; 
+            const imgY = currentY + 6; // Coordinate di partenza Y della mappa auto-adattiva
+            const maxBottomY = 188; // Limite invalicabile per non coprire il Piè di pagina
+            
+            // L'altezza massima della mappa si riduce dinamicamente per compensare l'aggiunta dei righi
+            let pdfMaxHeight = maxBottomY - imgY;
+            if (pdfMaxHeight < 80) pdfMaxHeight = 80; // Soglia di sicurezza minima
             
             const imgProps = doc.getImageProperties(imgData);
             const ratio = Math.min(pdfMaxWidth / imgProps.width, pdfMaxHeight / imgProps.height);
@@ -1968,7 +2437,6 @@
             const finalHeight = imgProps.height * ratio;
             
             const imgX = (297 - finalWidth) / 2;
-            const imgY = 35; 
             
             doc.setFillColor(210, 210, 210);
             doc.rect(imgX + 1.5, imgY + 1.5, finalWidth, finalHeight, 'F');
@@ -1977,11 +2445,46 @@
             doc.setLineWidth(0.3);
             doc.rect(imgX, imgY, finalWidth, finalHeight, 'S');
 
+            // --- Fact-Checking: Inserimento Legenda GIS Cartografica ---
+            const legW = 55;
+            const legH = 16;
+            const legX = imgX + 3;
+            const legY = imgY + finalHeight - legH - 3;
+            
+            // Sfondo bianco coprente per la legenda
+            doc.setFillColor(255, 255, 255);
+            doc.setDrawColor(120, 120, 120);
+            doc.setLineWidth(0.2);
+            doc.rect(legX, legY, legW, legH, 'FD');
+            
+            doc.setFont("helvetica", "bold");
+            doc.setFontSize(8);
+            doc.setTextColor(50, 50, 50);
+            doc.text("LEGENDA:", legX + 3, legY + 4.5);
+            
+            doc.setFont("helvetica", "normal");
+            doc.setFontSize(8);
+            doc.setTextColor(0, 0, 0);
+            
+            // Punto Magenta (Monumentali)
+            doc.setFillColor(255, 0, 255); // Magenta
+            doc.setDrawColor(74, 0, 74); 
+            doc.setLineWidth(0.3);
+            doc.circle(legX + 5, legY + 9, 1.5, 'FD');
+            doc.text("Olivi MONUMENTALI", legX + 9, legY + 10);
+            
+            // Punto Giallo (Non Monumentali)
+            doc.setFillColor(250, 204, 21); // Giallo
+            doc.setDrawColor(133, 77, 14); 
+            doc.circle(legX + 5, legY + 13.5, 1.5, 'FD');
+            doc.text("Olivi NON MONUMENTALI", legX + 9, legY + 14.5);
+            // --- Fine Legenda ---
+
             let nomeTecnico = document.getElementById("tecnico").value.trim();
             if (!nomeTecnico && treesDatabase.length > 0 && treesDatabase[0].tecnico) nomeTecnico = treesDatabase[0].tecnico;
             
             const buildVersion = document.getElementById("appVersion").innerText;
-            const appInfoTesto = `Planimetria - ${buildVersion}`; // Fact-Checking: Variabile ripristinata per evitare crash della mappa
+            const appInfoTesto = `Planimetria - ${buildVersion}`; 
 
             doc.setFont("helvetica", "normal");
             doc.setFontSize(10);
@@ -2037,7 +2540,6 @@
                     treesDatabase = savedRecords; 
                     showToast("Dati recuperati dalla memoria del dispositivo.");
                     
-                    // Ripristina campi testuali per comodità operativa
                     if (treesDatabase[0].committente) document.getElementById("committente").value = treesDatabase[0].committente;
                     if (treesDatabase[0].tecnico) document.getElementById("tecnico").value = treesDatabase[0].tecnico;
                 }

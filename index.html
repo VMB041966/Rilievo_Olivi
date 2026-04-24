@@ -372,8 +372,31 @@
                 }
                 const parts = ["[\n"];
                 for (let i = 0; i < treesDatabase.length; i++) {
-                    let record = treesDatabase[i];
-                    if (!includePhotos) record = { ...treesDatabase[i], photoData: "" };
+                    let record;
+                    if (!includePhotos) {
+                        // Fact-Checking: Estrazione chirurgica manuale per garantire la totale sterilizzazione della foto
+                        // bypassando i bug di clonazione memoria (Spread Operator) dei browser mobili.
+                        record = {
+                            id: treesDatabase[i].id,
+                            committente: treesDatabase[i].committente,
+                            tecnico: treesDatabase[i].tecnico,
+                            comune: treesDatabase[i].comune,
+                            foglio: treesDatabase[i].foglio,
+                            particella: treesDatabase[i].particella,
+                            lat: treesDatabase[i].lat,
+                            lng: treesDatabase[i].lng,
+                            coordE: treesDatabase[i].coordE,
+                            coordN: treesDatabase[i].coordN,
+                            classeDiametrica: treesDatabase[i].classeDiametrica,
+                            monumentalita: treesDatabase[i].monumentalita,
+                            ambiente: treesDatabase[i].ambiente,
+                            note: treesDatabase[i].note,
+                            photoName: treesDatabase[i].photoName,
+                            timestamp: treesDatabase[i].timestamp
+                        };
+                    } else {
+                        record = treesDatabase[i];
+                    }
                     parts.push(JSON.stringify(record));
                     if (i < treesDatabase.length - 1) parts.push(",\n");
                 }

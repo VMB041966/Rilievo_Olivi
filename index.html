@@ -93,10 +93,15 @@
 
     <main class="p-4 max-w-3xl mx-auto mt-4">
         
-        <!-- PULSANTE DI EMERGENZA (Nuovo) -->
-        <button type="button" class="btn shadow-md w-full mb-8" onclick="emergencyActiveBackup()" style="background-color: #eab308; color: black; border-color: #a16207; font-size: 1.1rem; animation: pulse 2s infinite;">
-            🚑 RECUPERO EMERGENZA (Salva File JSON)
-        </button>
+        <!-- PULSANTI DI EMERGENZA (Nuovi Fact-Checking memory leak) -->
+        <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
+            <button type="button" class="btn shadow-md w-full" onclick="emergencyActiveBackup(true)" style="background-color: #eab308; color: black; border-color: #a16207; font-size: 1.1rem;">
+                🚑 RECUPERO TOTALE (Con Foto)
+            </button>
+            <button type="button" class="btn shadow-md w-full" onclick="emergencyActiveBackup(false)" style="background-color: #fca5a5; color: black; border-color: #b91c1c; font-size: 1.1rem;">
+                🆘 SALVAVITA (Solo Dati - No Foto)
+            </button>
+        </div>
 
         <!-- FORM RILIEVO -->
         <form id="treeForm" onsubmit="event.preventDefault(); saveTree();" oninput="enableSaveButton()" onchange="enableSaveButton()">
@@ -332,7 +337,7 @@
             document.getElementById("appVersion").innerText = "v.Build-" + Math.abs(hash).toString(16).toUpperCase();
         }
 
-        // DATABASE LOCALE E BACKUP (Fact-Checking Sincrono)
+        // DATABASE LOCALE E BACKUP
         function initLocalDB() {
             return new Promise((resolve, reject) => {
                 const request = indexedDB.open(dbName, 2);
@@ -360,21 +365,38 @@
             });
         }
 
-        function emergencyActiveBackup() {
+        // --- FACT-CHECKING: Algoritmo di Prevenzione Out of Memory ---
+        function emergencyActiveBackup(includePhotos = true) {
             try {
-                // Recupero Sincrono Diretto dalla RAM per aggirare il blocco di memoria e restrizioni Browser
                 if (!treesDatabase || treesDatabase.length === 0) {
                     alert("Attenzione: Nessun rilievo trovato in memoria attualmente a schermo.");
                     return;
                 }
-                const dataStr = JSON.stringify(treesDatabase);
-                const blob = new Blob([dataStr], { type: "application/json" });
+                
+                // Per evitare che l'App provi a formare un'unica stringa colossale che manda in crash 
+                // i limiti fisici di memoria RAM (V8 Engine String Limit), costruiamo l'array pezzo per pezzo
+                // e lo diamo in pasto al Blob che sa gestirlo in memoria strutturata senza crashare.
+                const parts = ["[\n"];
+                for (let i = 0; i < treesDatabase.length; i++) {
+                    let record = treesDatabase[i];
+                    if (!includePhotos) {
+                        record = { ...treesDatabase[i], photoData: "" }; // "Sterilizza" la foto
+                    }
+                    parts.push(JSON.stringify(record));
+                    if (i < treesDatabase.length - 1) {
+                        parts.push(",\n");
+                    }
+                }
+                parts.push("\n]");
+                
+                const blob = new Blob(parts, { type: "application/json" });
                 const url = window.URL.createObjectURL(blob);
                 
                 const link = document.createElement("a");
                 link.href = url;
                 const dateStr = new Date().toISOString().slice(0,10).replace(/-/g, "");
-                link.download = `Recupero_Emergenza_Olivi_${dateStr}.json`;
+                const suffix = includePhotos ? "COMPLETO" : "SOLO_DATI";
+                link.download = `Emergenza_Olivi_${suffix}_${dateStr}.json`;
                 
                 link.style.display = "none";
                 document.body.appendChild(link);
@@ -385,9 +407,9 @@
                     window.URL.revokeObjectURL(url);
                 }, 800);
                 
-                alert("Estrazione completata! Controlla la cartella 'Download' per il file JSON.");
+                alert(`Estrazione ${suffix} completata! Controlla la cartella 'Download' del tablet.`);
             } catch (err) {
-                alert("Errore critico durante l'estrazione: " + err.message + " - Assicurati di aver generato almeno il file .CSV.");
+                alert("Errore critico durante l'estrazione: " + err.message + " - Prova ad usare il tasto 'SALVAVITA (Solo Dati)'.");
             }
         }
 

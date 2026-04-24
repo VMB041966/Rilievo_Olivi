@@ -25,25 +25,50 @@ window.exportDatabase = exportDatabase;
 // --- FUNZIONE DI RECUPERO EMERGENZA ---
         async function emergencyActiveBackup() {
             try {
-                showToast("Compilazione backup di emergenza...");
-                // Preleva i dati direttamente dalla RAM senza passare per l'IndexedDB dell'archivio
-                const dataStr = JSON.stringify(treesDatabase);
+                // Recupero SICURO direttamente dal database fisico (IndexedDB) bypassando la RAM volatile
+                const activeData = await new Promise((resolve, reject) => {
+                    if (!localDB) {
+                        reject(new Error("Database non inizializzato."));
+                        return;
+                    }
+                    const transaction = localDB.transaction(["rilievi"], "readonly");
+                    const store = transaction.objectStore("rilievi");
+                    const request = store.getAll();
+                    request.onsuccess = () => resolve(request.result);
+                    request.onerror = () => reject(request.error);
+                });
+
+                if (!activeData || activeData.length === 0) {
+                    alert("Attenzione: Nessun rilievo trovato nel database fisico attivo del dispositivo.");
+                    return;
+                }
+
+                const dataStr = JSON.stringify(activeData);
                 const blob = new Blob([dataStr], { type: "application/json" });
-                const url = URL.createObjectURL(blob);
+                const url = window.URL.createObjectURL(blob);
                 
                 const link = document.createElement("a");
                 link.href = url;
                 const dateStr = new Date().toISOString().slice(0,10).replace(/-/g, "");
                 link.download = `Recupero_Emergenza_Olivi_${dateStr}.json`;
+                
+                // Fix per compatibilità browser su Tablet/Smartphone
+                link.style.display = "none";
                 document.body.appendChild(link);
                 link.click();
-                document.body.removeChild(link);
-                URL.revokeObjectURL(url);
                 
-                showToast("Dati recuperati con successo!");
+                // Ritardo nella pulizia dell'oggetto URL per garantire l'avvio del download su Mobile
+                setTimeout(() => {
+                    document.body.removeChild(link);
+                    window.URL.revokeObjectURL(url);
+                }, 800);
+                
+                // Feedback nativo inattaccabile
+                alert("Estrazione completata! Controlla la cartella 'Download' del tuo tablet per il file JSON.");
+                
             } catch (err) {
                 console.error("Errore esportazione emergenza:", err);
-                showErrorModal("Memoria RAM troppo satura per generare il JSON completo. Assicurati di aver esportato il file CSV.");
+                alert("Errore critico durante l'estrazione: " + err.message + " - Assicurati di aver generato almeno il file .CSV.");
             }
         }
 

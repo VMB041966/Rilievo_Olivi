@@ -93,7 +93,7 @@
 
     <main class="p-4 max-w-3xl mx-auto mt-4">
         
-        <!-- PULSANTI DI EMERGENZA (Nuovi Fact-Checking memory leak) -->
+        <!-- PULSANTI DI EMERGENZA -->
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mb-8">
             <button type="button" class="btn shadow-md w-full" onclick="emergencyActiveBackup(true)" style="background-color: #eab308; color: black; border-color: #a16207; font-size: 1.1rem;">
                 🚑 RECUPERO TOTALE (Con Foto)
@@ -327,7 +327,6 @@
             document.getElementById("errorModal").style.display = "flex";
         }
         function generateVersionHash() {
-            // Algoritmo di auto-versionamento per generare la Versione Build
             const scriptContent = document.getElementById("coreLogic").innerText;
             let hash = 0;
             for (let i = 0; i < scriptContent.length; i++) {
@@ -365,33 +364,23 @@
             });
         }
 
-        // --- FACT-CHECKING: Algoritmo di Prevenzione Out of Memory ---
         function emergencyActiveBackup(includePhotos = true) {
             try {
                 if (!treesDatabase || treesDatabase.length === 0) {
                     alert("Attenzione: Nessun rilievo trovato in memoria attualmente a schermo.");
                     return;
                 }
-                
-                // Per evitare che l'App provi a formare un'unica stringa colossale che manda in crash 
-                // i limiti fisici di memoria RAM (V8 Engine String Limit), costruiamo l'array pezzo per pezzo
-                // e lo diamo in pasto al Blob che sa gestirlo in memoria strutturata senza crashare.
                 const parts = ["[\n"];
                 for (let i = 0; i < treesDatabase.length; i++) {
                     let record = treesDatabase[i];
-                    if (!includePhotos) {
-                        record = { ...treesDatabase[i], photoData: "" }; // "Sterilizza" la foto
-                    }
+                    if (!includePhotos) record = { ...treesDatabase[i], photoData: "" };
                     parts.push(JSON.stringify(record));
-                    if (i < treesDatabase.length - 1) {
-                        parts.push(",\n");
-                    }
+                    if (i < treesDatabase.length - 1) parts.push(",\n");
                 }
                 parts.push("\n]");
                 
                 const blob = new Blob(parts, { type: "application/json" });
                 const url = window.URL.createObjectURL(blob);
-                
                 const link = document.createElement("a");
                 link.href = url;
                 const dateStr = new Date().toISOString().slice(0,10).replace(/-/g, "");
@@ -402,11 +391,7 @@
                 document.body.appendChild(link);
                 link.click();
                 
-                setTimeout(() => {
-                    document.body.removeChild(link);
-                    window.URL.revokeObjectURL(url);
-                }, 800);
-                
+                setTimeout(() => { document.body.removeChild(link); window.URL.revokeObjectURL(url); }, 800);
                 alert(`Estrazione ${suffix} completata! Controlla la cartella 'Download' del tablet.`);
             } catch (err) {
                 alert("Errore critico durante l'estrazione: " + err.message + " - Prova ad usare il tasto 'SALVAVITA (Solo Dati)'.");
@@ -422,11 +407,9 @@
                     req.onsuccess = () => resolve(req.result || []);
                 });
                 if (sessions.length === 0) { showErrorModal("L'Archivio Storico è vuoto."); return; }
-                
                 const dataStr = JSON.stringify(sessions);
                 const blob = new Blob([dataStr], { type: "application/json" });
                 const url = URL.createObjectURL(blob);
-                
                 const link = document.createElement("a");
                 link.href = url;
                 const dateStr = new Date().toISOString().slice(0,10).replace(/-/g, "");
@@ -459,7 +442,7 @@
             reader.readAsText(file);
         }
 
-        // COMPRESSIONE FOTOGRAFICA (Soluzione Out of Memory)
+        // COMPRESSIONE FOTOGRAFICA
         function handlePhoto(event) {
             const file = event.target.files[0];
             if (!file) return;
@@ -469,27 +452,17 @@
                 const img = new Image();
                 img.onload = function() {
                     const canvas = document.createElement("canvas");
-                    const MAX_WIDTH = 1024;
-                    const MAX_HEIGHT = 1024;
-                    let width = img.width;
-                    let height = img.height;
-                    if (width > height) {
-                        if (width > MAX_WIDTH) { height *= MAX_WIDTH / width; width = MAX_WIDTH; }
-                    } else {
-                        if (height > MAX_HEIGHT) { width *= MAX_HEIGHT / height; height = MAX_HEIGHT; }
-                    }
+                    const MAX_WIDTH = 1024; const MAX_HEIGHT = 1024;
+                    let width = img.width; let height = img.height;
+                    if (width > height) { if (width > MAX_WIDTH) { height *= MAX_WIDTH / width; width = MAX_WIDTH; } } 
+                    else { if (height > MAX_HEIGHT) { width *= MAX_HEIGHT / height; height = MAX_HEIGHT; } }
                     canvas.width = width; canvas.height = height;
-                    const ctx = canvas.getContext("2d");
-                    ctx.drawImage(img, 0, 0, width, height);
-                    
-                    // Compressione a 60,00% per risparmio vitale di RAM
+                    const ctx = canvas.getContext("2d"); ctx.drawImage(img, 0, 0, width, height);
                     const compressedDataUrl = canvas.toDataURL("image/jpeg", 0.60);
                     document.getElementById("photoDataUrl").value = compressedDataUrl;
                     document.getElementById("photoFileName").value = file.name;
-                    
                     const preview = document.getElementById("photoPreview");
-                    preview.src = compressedDataUrl;
-                    preview.style.display = "block";
+                    preview.src = compressedDataUrl; preview.style.display = "block";
                     document.getElementById("photoNameDisplay").innerText = file.name + " (Compressa)";
                 };
                 img.src = e.target.result;
@@ -497,7 +470,6 @@
             reader.readAsDataURL(file);
         }
 
-        // SALVATAGGIO RILIEVO E GESTIONE UI
         function enableSaveButton() {
             const btn = document.getElementById("saveTreeBtn");
             if (btn && btn.disabled) { btn.disabled = false; btn.innerHTML = "💾 Salva Rilievo Pianta"; }
@@ -514,61 +486,39 @@
 
             const id = document.getElementById("idPianta").value;
             const treeRecord = {
-                id: id,
-                committente: document.getElementById("committente").value.toUpperCase(),
-                tecnico: document.getElementById("tecnico").value.toUpperCase(),
-                comune: document.getElementById("comune").value.toUpperCase(),
-                foglio: document.getElementById("foglio").value.toUpperCase(),
-                particella: document.getElementById("particella").value.toUpperCase(),
-                lat: currentClickLatLng.lat,
-                lng: currentClickLatLng.lng,
-                coordE: document.getElementById("coordE").value,
-                coordN: document.getElementById("coordN").value,
-                classeDiametrica: document.getElementById("classeDiametrica").value,
-                monumentalita: document.getElementById("monumentalita").value,
-                ambiente: document.getElementById("ambiente").value,
-                note: document.getElementById("note").value,
-                photoData: photoData,
-                photoName: document.getElementById("photoFileName").value,
-                timestamp: new Date().toISOString()
+                id: id, committente: document.getElementById("committente").value.toUpperCase(), tecnico: document.getElementById("tecnico").value.toUpperCase(),
+                comune: document.getElementById("comune").value.toUpperCase(), foglio: document.getElementById("foglio").value.toUpperCase(),
+                particella: document.getElementById("particella").value.toUpperCase(), lat: currentClickLatLng.lat, lng: currentClickLatLng.lng,
+                coordE: document.getElementById("coordE").value, coordN: document.getElementById("coordN").value,
+                classeDiametrica: document.getElementById("classeDiametrica").value, monumentalita: document.getElementById("monumentalita").value,
+                ambiente: document.getElementById("ambiente").value, note: document.getElementById("note").value, photoData: photoData,
+                photoName: document.getElementById("photoFileName").value, timestamp: new Date().toISOString()
             };
 
             treesDatabase.push(treeRecord);
-            
             await new Promise((resolve) => {
                 const tx = localDB.transaction([storeName], "readwrite");
                 tx.objectStore(storeName).put(treeRecord).onsuccess = resolve;
             });
 
             document.getElementById("recordCount").innerText = treesDatabase.length;
-            updateNextId();
-            renderTreeList();
+            updateNextId(); renderTreeList();
             
-            document.getElementById("classeDiametrica").value = "";
-            document.getElementById("monumentalita").value = "";
-            document.getElementById("ambiente").value = "";
-            document.getElementById("note").value = "";
-            document.getElementById("photoInput").value = "";
-            document.getElementById("photoDataUrl").value = "";
-            document.getElementById("photoFileName").value = "";
-            document.getElementById("photoPreview").style.display = "none";
+            document.getElementById("classeDiametrica").value = ""; document.getElementById("monumentalita").value = "";
+            document.getElementById("ambiente").value = ""; document.getElementById("note").value = "";
+            document.getElementById("photoInput").value = ""; document.getElementById("photoDataUrl").value = "";
+            document.getElementById("photoFileName").value = ""; document.getElementById("photoPreview").style.display = "none";
             document.getElementById("photoNameDisplay").innerText = "";
             
-            if (pinMarker) pinMarker.setMap(null);
-            pinMarker = null;
-            currentClickLatLng = null;
+            if (pinMarker) pinMarker.setMap(null); pinMarker = null; currentClickLatLng = null;
 
-            disableSaveButton();
-            showToast("Pianta " + id + " salvata in modo sicuro sul dispositivo!");
-            window.scrollTo(0, 0);
+            disableSaveButton(); showToast("Pianta " + id + " salvata in modo sicuro sul dispositivo!"); window.scrollTo(0, 0);
         }
 
         function updateNextId() {
             const usedIds = treesDatabase.map(t => parseInt(t.id, 10)).sort((a,b) => a - b);
             let nextId = 1;
-            for (let i = 0; i < usedIds.length; i++) {
-                if (usedIds[i] === nextId) nextId++; else break;
-            }
+            for (let i = 0; i < usedIds.length; i++) { if (usedIds[i] === nextId) nextId++; else break; }
             document.getElementById("idPianta").value = String(nextId).padStart(3, '0');
         }
 
@@ -577,19 +527,8 @@
             if(treesDatabase.length === 0) { listObj.innerHTML = '<p class="text-gray-500 italic">Nessun rilievo salvato.</p>'; return; }
             listObj.innerHTML = "";
             treesDatabase.forEach(t => {
-                const div = document.createElement("div");
-                div.className = "bg-white p-3 rounded shadow border border-gray-200 flex justify-between items-center";
-                div.innerHTML = `
-                    <div>
-                        <span class="font-bold text-lg">ID: ${t.id}</span>
-                        <span class="text-sm text-gray-600 ml-2">Foglio ${t.foglio} Part. ${t.particella}</span><br>
-                        <span class="text-xs font-bold text-${t.monumentalita === 'MONUMENTALE' ? 'purple-600' : 'yellow-600'}">${t.monumentalita}</span>
-                    </div>
-                    <div class="flex space-x-2">
-                        <button onclick="centerMapOnTree('${t.id}')" class="bg-blue-100 hover:bg-blue-200 text-blue-800 p-2 rounded text-xl" title="Centra in mappa">🎯</button>
-                        <button onclick="deleteTree('${t.id}')" class="bg-red-100 hover:bg-red-200 text-red-800 p-2 rounded text-xl" title="Elimina">🗑️</button>
-                    </div>
-                `;
+                const div = document.createElement("div"); div.className = "bg-white p-3 rounded shadow border border-gray-200 flex justify-between items-center";
+                div.innerHTML = `<div><span class="font-bold text-lg">ID: ${t.id}</span><span class="text-sm text-gray-600 ml-2">Foglio ${t.foglio} Part. ${t.particella}</span><br><span class="text-xs font-bold text-${t.monumentalita === 'MONUMENTALE' ? 'purple-600' : 'yellow-600'}">${t.monumentalita}</span></div><div class="flex space-x-2"><button onclick="centerMapOnTree('${t.id}')" class="bg-blue-100 hover:bg-blue-200 text-blue-800 p-2 rounded text-xl" title="Centra in mappa">🎯</button><button onclick="deleteTree('${t.id}')" class="bg-red-100 hover:bg-red-200 text-red-800 p-2 rounded text-xl" title="Elimina">🗑️</button></div>`;
                 listObj.appendChild(div);
             });
             renderSavedTreeMarkers();
@@ -598,12 +537,9 @@
         async function deleteTree(id) {
             if(!confirm("Sicuro di voler eliminare la pianta ID " + id + "?")) return;
             treesDatabase = treesDatabase.filter(t => t.id !== id);
-            await new Promise(resolve => {
-                localDB.transaction([storeName], "readwrite").objectStore(storeName).delete(id).onsuccess = resolve;
-            });
+            await new Promise(resolve => { localDB.transaction([storeName], "readwrite").objectStore(storeName).delete(id).onsuccess = resolve; });
             document.getElementById("recordCount").innerText = treesDatabase.length;
-            renderTreeList();
-            showToast("Pianta eliminata.");
+            renderTreeList(); showToast("Pianta eliminata.");
         }
 
         // MAPPA E GEOJSON
@@ -619,8 +555,7 @@
         function loadGoogleMapsScript(key) {
             const script = document.createElement("script");
             script.src = `https://maps.googleapis.com/maps/api/js?key=${key}&callback=initMap`;
-            script.async = true;
-            script.defer = true;
+            script.async = true; script.defer = true;
             document.head.appendChild(script);
         }
 
@@ -646,8 +581,7 @@
                     else content += `<b class="uppercase text-xs text-gray-500">${p}:</b> <span class="font-semibold text-gray-900">${val}</span><br>`;
                     found = true;
                 });
-                if(!found) content += 'Nessun metadato.';
-                content += '</div>';
+                if(!found) content += 'Nessun metadato.'; content += '</div>';
                 geoJsonInfoWindow.setContent(content); geoJsonInfoWindow.setPosition(event.latLng); geoJsonInfoWindow.open(map);
                 if (infoWindowTimeout) clearTimeout(infoWindowTimeout);
                 infoWindowTimeout = setTimeout(() => geoJsonInfoWindow.close(), 5000);
@@ -657,10 +591,10 @@
             if (navigator.geolocation) {
                 navigator.geolocation.getCurrentPosition(
                     (p) => { const loc = { lat: p.coords.latitude, lng: p.coords.longitude }; map.setCenter(loc); userMarker = new google.maps.Marker({ position: loc, map: map, icon: { path: google.maps.SymbolPath.CIRCLE, scale: 8, fillColor: "#3b82f6", fillOpacity: 1, strokeColor: "#ffffff", strokeWeight: 2 } }); document.getElementById("gpsStatus").innerText = "GPS Attivo - Precisione: " + Math.round(p.coords.accuracy) + "m"; },
-                    () => { document.getElementById("gpsStatus").innerText = "Errore segnale GPS."; },
-                    { enableHighAccuracy: true, maximumAge: 0 }
+                    () => { document.getElementById("gpsStatus").innerText = "Errore segnale GPS."; }, { enableHighAccuracy: true, maximumAge: 0 }
                 );
             }
+            // Richiama il render in sicurezza ora che la mappa esiste
             renderSavedTreeMarkers();
         }
 
@@ -672,13 +606,16 @@
             const lng = latLng.lng(); const lat = latLng.lat();
             const zone = Math.floor((lng + 180) / 6) + 1;
             const utmCoords = proj4("+proj=longlat +datum=WGS84 +no_defs", `+proj=utm +zone=${zone} +datum=WGS84 +units=m +no_defs`, [lng, lat]);
-            // Rispettato il format Numeri e Punti Cardinali come da promemoria
             document.getElementById("coordE").value = `${utmCoords[0].toFixed(2).replace('.', ',')} m Est`;
             document.getElementById("coordN").value = `${utmCoords[1].toFixed(2).replace('.', ',')} m Nord`;
             enableSaveButton();
         }
 
         function renderSavedTreeMarkers() {
+            // --- FACT-CHECKING: Guard Clause Fondamentale ---
+            // Impedisce che i marker vengano caricati se Google Maps non ha ancora finito di generare l'ambiente
+            if (typeof google === 'undefined' || !map) return; 
+
             savedMarkers.forEach(m => m.setMap(null)); savedMarkers = [];
             treesDatabase.forEach(t => {
                 const color = t.monumentalita === "MONUMENTALE" ? "#d946ef" : "#facc15";
@@ -689,8 +626,12 @@
         function centerMapOnTree(id) { const tree = treesDatabase.find(t => t.id === id); if (tree && map) { map.setCenter({ lat: tree.lat, lng: tree.lng }); map.setZoom(21); window.scrollTo({ top: 0, behavior: 'smooth' }); } }
         function zoomToAllMarkers() { if (savedMarkers.length === 0) return; const bounds = new google.maps.LatLngBounds(); savedMarkers.forEach(m => bounds.extend(m.getPosition())); map.fitBounds(bounds); }
 
-        // CATASTO E RICERCA
         function loadGeoJson(e) {
+            // Protezione contro caricamenti accidentali prima del render della mappa
+            if (typeof google === 'undefined' || !map) { 
+                showErrorModal("Attendi il caricamento completo della mappa prima di caricare la particella catastale."); 
+                return; 
+            }
             const file = e.target.files[0]; if (!file) return;
             const r = new FileReader();
             r.onload = function(ev) {
@@ -718,16 +659,16 @@
                 } catch(err) { showErrorModal("Errore conversione GeoJSON."); }
             }; r.readAsText(file);
         }
-        function clearGeoJson() { map.data.forEach(f => map.data.remove(f)); hasGeoJsonLoaded=false; highlightedFeatures=[]; document.getElementById('clearGeoJsonBtn').classList.add('hidden'); document.getElementById('toggleGeoJsonBtn').classList.add('hidden'); document.getElementById('geojsonOpacityContainer').style.display='none'; document.getElementById('searchParcelContainer').style.display='none'; }
+        function clearGeoJson() { if(!map) return; map.data.forEach(f => map.data.remove(f)); hasGeoJsonLoaded=false; highlightedFeatures=[]; document.getElementById('clearGeoJsonBtn').classList.add('hidden'); document.getElementById('toggleGeoJsonBtn').classList.add('hidden'); document.getElementById('geojsonOpacityContainer').style.display='none'; document.getElementById('searchParcelContainer').style.display='none'; }
         function toggleGeoJsonVisibility() {
-            if (!hasGeoJsonLoaded) return; isGeoJsonVisible = !isGeoJsonVisible;
+            if (!hasGeoJsonLoaded || !map) return; isGeoJsonVisible = !isGeoJsonVisible;
             const btn = document.getElementById('toggleGeoJsonBtn');
             if (isGeoJsonVisible) { btn.innerHTML = '👁️ Nascondi'; btn.className = 'btn-sm-ui bg-gray-600 text-white shrink-0'; } 
             else { btn.innerHTML = '👁️‍🗨️ Mostra'; btn.className = 'btn-sm-ui bg-indigo-600 text-white shrink-0'; if(geoJsonInfoWindow) geoJsonInfoWindow.close(); }
             updateGeoJsonStyle();
         }
         function searchParcel() {
-            if (!hasGeoJsonLoaded) return;
+            if (!hasGeoJsonLoaded || !map) return;
             const searchInput = document.getElementById('searchParcelInput'); const parcelNumber = searchInput.value.trim().toUpperCase();
             if (!parcelNumber) { highlightedFeatures = []; updateGeoJsonStyle(); searchInput.blur(); return; }
             if (!isGeoJsonVisible) toggleGeoJsonVisibility();
@@ -736,12 +677,13 @@
                 let isMatch = false; const fId = f.getId();
                 if (fId && (String(fId).toUpperCase() === parcelNumber || String(fId).toUpperCase().endsWith('.' + parcelNumber))) isMatch = true;
                 if (!isMatch) f.forEachProperty(function(v, p) { if (v && String(v).trim().toUpperCase() === parcelNumber && (p.toUpperCase().includes('CODICE') || p.toUpperCase().includes('NUMERO'))) isMatch = true; });
-                if (isMatch) { found = true; highlightedFeatures.push(f); f.getGeometry().forEachLatLng(ll => bounds.extend(ll)); } // Simplified bbox for brevity
+                if (isMatch) { found = true; highlightedFeatures.push(f); f.getGeometry().forEachLatLng(ll => bounds.extend(ll)); }
             });
             if (found) { updateGeoJsonStyle(); map.fitBounds(bounds); google.maps.event.addListenerOnce(map, 'bounds_changed', function() { if(this.getZoom() > 22) this.setZoom(22); }); showToast("Particella individuata!"); searchInput.blur(); window.scrollTo(0,0); } 
             else { highlightedFeatures = []; updateGeoJsonStyle(); showErrorModal("Particella non trovata."); }
         }
         function updateGeoJsonStyle() {
+            if(!map) return;
             const opacity = parseFloat(document.getElementById('catastoOpacity').value);
             document.getElementById('catastoOpacityValue').innerText = Math.round(opacity*100)+'%';
             map.data.setStyle(function(f) {
@@ -754,10 +696,7 @@
         }
 
         // ESPORTAZIONI
-        function formatNumberITA(num) {
-            // Regola Prompt: Formattazione Numeri 1.500,00
-            return num.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-        }
+        function formatNumberITA(num) { return num.toLocaleString('it-IT', { minimumFractionDigits: 2, maximumFractionDigits: 2 }); }
         function exportCSV() {
             if (treesDatabase.length === 0) { showErrorModal("Nessun dato da esportare."); return; }
             let csvContent = "ID,Committente,Tecnico,Comune,Foglio,Particella,Lat(WGS84),Lng(WGS84),Est(UTM),Nord(UTM),Classe_Diametrica,Monumentalita,Ambiente,Note\n";
@@ -773,14 +712,9 @@
             if (!map) { showErrorModal("Mappa non caricata."); return; }
             showToast("Generazione Planimetria PDF in corso...");
             try {
-                const mapDiv = document.getElementById("map");
-                const canvas = await html2canvas(mapDiv, { useCORS: true });
-                const imgData = canvas.toDataURL('image/jpeg', 0.9);
-                const doc = new window.jsPDF('landscape');
-                
-                doc.setFontSize(15); doc.text("Planimetria Rilievi - Classificazione olivi (L.R. Puglia 14/2007)", 14, 20);
-                doc.setFontSize(11);
-                
+                const mapDiv = document.getElementById("map"); const canvas = await html2canvas(mapDiv, { useCORS: true });
+                const imgData = canvas.toDataURL('image/jpeg', 0.9); const doc = new window.jsPDF('landscape');
+                doc.setFontSize(15); doc.text("Planimetria Rilievi - Classificazione olivi (L.R. Puglia 14/2007)", 14, 20); doc.setFontSize(11);
                 let catastaliMap = new Map();
                 treesDatabase.forEach(t => {
                     if (!t.foglio) return;
@@ -789,36 +723,27 @@
                 });
                 let catList = Array.from(catastaliMap.keys()).map(f => ({ foglio: f, comune: catastaliMap.get(f).comune, part: Array.from(catastaliMap.get(f).particelle) }));
                 catList.sort((a,b) => a.foglio.localeCompare(b.foglio, undefined, {numeric: true}));
-                
                 let currentY = 27;
                 if (catList.length === 0) { doc.text("Comune: N/D - Foglio: N/D - Part: N/D", 14, currentY); currentY+=6; }
                 else { catList.forEach(i => { i.part.sort((a,b)=>a.localeCompare(b, undefined, {numeric:true})); doc.text(`Comune: ${i.comune} - Foglio: ${i.foglio} - Particella/e: ${i.part.join(", ")}`, 14, currentY); currentY+=6; }); }
-                
                 doc.text(`Data: ${new Date().toLocaleDateString('it-IT')} - Totale Piante: ${formatNumberITA(treesDatabase.length)}`, 14, currentY);
-                
-                const imgProps = doc.getImageProperties(imgData);
-                const finalHeight = 110; const finalWidth = imgProps.width * (finalHeight / imgProps.height);
+                const imgProps = doc.getImageProperties(imgData); const finalHeight = 110; const finalWidth = imgProps.width * (finalHeight / imgProps.height);
                 doc.addImage(imgData, 'JPEG', 14, currentY+6, finalWidth, finalHeight);
-                
-                // Legenda
-                doc.setFillColor(255,255,255); doc.rect(17, currentY+6+finalHeight-20, 55, 16, 'FD');
-                doc.setFontSize(8); doc.text("LEGENDA:", 20, currentY+6+finalHeight-15);
+                doc.setFillColor(255,255,255); doc.rect(17, currentY+6+finalHeight-20, 55, 16, 'FD'); doc.setFontSize(8); doc.text("LEGENDA:", 20, currentY+6+finalHeight-15);
                 doc.setFillColor(255,0,255); doc.circle(22, currentY+6+finalHeight-11, 1.5, 'FD'); doc.text("MONUMENTALI", 26, currentY+6+finalHeight-10);
                 doc.setFillColor(250,204,21); doc.circle(22, currentY+6+finalHeight-6, 1.5, 'FD'); doc.text("NON MONUMENTALI", 26, currentY+6+finalHeight-5);
-                
                 doc.save(`Planimetria_${new Date().toISOString().slice(0,10).replace(/-/g,"")}.pdf`);
             } catch(e) { showErrorModal("Errore mappa PDF."); }
         }
 
-        // Funzioni fittizie export (omesse per limiti di spazio ma strutturate)
-        function exportPDF() { showToast("Funzione Report Globale non implementata nel prototipo semplificato per limiti di spazio."); }
+        function exportPDF() { showToast("Report Globale non implementato nel prototipo semplificato."); }
         function exportPDFMonumentali() { showToast("Esporta Monumentali in sviluppo."); }
         function exportPDFNonMonumentali() { showToast("Esporta Non Monumentali in sviluppo."); }
         function exportZIP() { showToast("Esporta ZIP Foto in sviluppo."); }
         function showNewSessionModal() { document.getElementById('newSessionModal').style.display = 'flex'; }
         function confirmNewSession() { alert("Sessione archiviata."); document.getElementById('newSessionModal').style.display='none'; }
         function showArchiveModal() { document.getElementById('archiveModal').style.display = 'flex'; }
-        function restoreSession() { alert("Ripristino disabilitato in questa build compatta."); }
+        function restoreSession() { alert("Ripristino disabilitato."); }
 
         // AVVIO APP
         window.onload = async function() {

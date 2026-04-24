@@ -374,8 +374,6 @@
                 for (let i = 0; i < treesDatabase.length; i++) {
                     let record;
                     if (!includePhotos) {
-                        // Fact-Checking: Estrazione chirurgica manuale per garantire la totale sterilizzazione della foto
-                        // bypassando i bug di clonazione memoria (Spread Operator) dei browser mobili.
                         record = {
                             id: treesDatabase[i].id,
                             committente: treesDatabase[i].committente,
@@ -636,17 +634,47 @@
 
         function renderSavedTreeMarkers() {
             // --- FACT-CHECKING: Guard Clause Fondamentale ---
-            // Impedisce che i marker vengano caricati se Google Maps non ha ancora finito di generare l'ambiente
             if (typeof google === 'undefined' || !map) return; 
 
             savedMarkers.forEach(m => m.setMap(null)); savedMarkers = [];
+            
             treesDatabase.forEach(t => {
-                const color = t.monumentalita === "MONUMENTALE" ? "#d946ef" : "#facc15";
-                const marker = new google.maps.Marker({ position: {lat: t.lat, lng: t.lng}, map: map, icon: { path: google.maps.SymbolPath.CIRCLE, scale: 5, fillColor: color, fillOpacity: 1, strokeColor: "#000", strokeWeight: 1 }, title: `ID: ${t.id}` });
-                savedMarkers.push(marker);
+                try {
+                    // Fact-Checking Sicurezza Dati: Forzatura del formato in numero decimale puro.
+                    // Evita l'errore "InvalidValueError" di Google Maps che fa crashare il rendering.
+                    const latNum = parseFloat(t.lat);
+                    const lngNum = parseFloat(t.lng);
+                    
+                    if (isNaN(latNum) || isNaN(lngNum)) return; // Salta il record se è corrotto ma prosegue con gli altri
+
+                    const color = t.monumentalita === "MONUMENTALE" ? "#d946ef" : "#facc15";
+                    const marker = new google.maps.Marker({ 
+                        position: { lat: latNum, lng: lngNum }, 
+                        map: map, 
+                        icon: { path: google.maps.SymbolPath.CIRCLE, scale: 5, fillColor: color, fillOpacity: 1, strokeColor: "#000", strokeWeight: 1 }, 
+                        title: `ID: ${t.id}` 
+                    });
+                    savedMarkers.push(marker);
+                } catch (e) {
+                    console.warn("Impossibile renderizzare il marker per la pianta ID: " + t.id, e);
+                }
             });
         }
-        function centerMapOnTree(id) { const tree = treesDatabase.find(t => t.id === id); if (tree && map) { map.setCenter({ lat: tree.lat, lng: tree.lng }); map.setZoom(21); window.scrollTo({ top: 0, behavior: 'smooth' }); } }
+        
+        function centerMapOnTree(id) { 
+            const tree = treesDatabase.find(t => t.id === id); 
+            if (tree && map) { 
+                // Sicurezza applicata anche al centramento mappa
+                const latNum = parseFloat(tree.lat);
+                const lngNum = parseFloat(tree.lng);
+                if (!isNaN(latNum) && !isNaN(lngNum)) {
+                    map.setCenter({ lat: latNum, lng: lngNum }); 
+                    map.setZoom(21); 
+                    window.scrollTo({ top: 0, behavior: 'smooth' }); 
+                }
+            } 
+        }
+        
         function zoomToAllMarkers() { if (savedMarkers.length === 0) return; const bounds = new google.maps.LatLngBounds(); savedMarkers.forEach(m => bounds.extend(m.getPosition())); map.fitBounds(bounds); }
 
         function loadGeoJson(e) {
